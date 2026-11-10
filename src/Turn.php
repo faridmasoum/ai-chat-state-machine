@@ -1,6 +1,6 @@
 <?php
 
-namespace Farid\AiChatStateMachine;
+namespace FaridM\AiChatStateMachine;
 
 /**
  * One user action sent into the flow: a button choice, free text, a list of

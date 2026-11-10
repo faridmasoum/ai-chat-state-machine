@@ -1,6 +1,6 @@
 <?php
 
-namespace Farid\AiChatStateMachine;
+namespace FaridM\AiChatStateMachine;
 
 /**
  * Outcome of parsing a turn against one step's validation rules.

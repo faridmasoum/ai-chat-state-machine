@@ -1,11 +1,11 @@
 <?php
 
-namespace Farid\AiChatStateMachine;
+namespace FaridM\AiChatStateMachine;
 
-use Farid\AiChatStateMachine\Contracts\ChatSession;
-use Farid\AiChatStateMachine\Contracts\TurnInterpreter;
-use Farid\AiChatStateMachine\Exceptions\InvalidTurnException;
-use Farid\AiChatStateMachine\Exceptions\StepMismatchException;
+use FaridM\AiChatStateMachine\Contracts\ChatSession;
+use FaridM\AiChatStateMachine\Contracts\TurnInterpreter;
+use FaridM\AiChatStateMachine\Exceptions\InvalidTurnException;
+use FaridM\AiChatStateMachine\Exceptions\StepMismatchException;
 
 /**
  * Deterministic, server-controlled conversation flow.
@@ -128,8 +128,12 @@ final class FlowEngine
         $state = $session->chatState();
         $key = $session->currentStep();
 
-        if ($session->isCompleted() || $key === self::DONE) {
+        if ($session->isCompleted()) {
             return ['type' => 'done', 'step' => self::DONE];
+        }
+
+        if ($key === self::DONE) {
+            return $this->reviewUi($state);
         }
 
         $step = $this->flow->step($key);
@@ -137,7 +141,28 @@ final class FlowEngine
             return ['type' => 'done', 'step' => self::DONE];
         }
 
-        return $step->stepUi($state) + ['step' => $key];
+        return $step->stepUi($state) + [
+            'step' => $key,
+            'message' => $step->label,
+            'optional' => $step->isOptional($state),
+        ];
+    }
+
+    /**
+     * Every applicable step answered: show a summary the user can edit or submit.
+     *
+     * @return array<string, mixed>
+     */
+    private function reviewUi(ChatState $state): array
+    {
+        $items = [];
+        foreach ($this->flow->steps() as $key => $step) {
+            if ($step->stepApplies($state) && $state->has($key)) {
+                $items[] = ['step' => $key, 'label' => $step->label, 'value' => $step->stepDisplay($state)];
+            }
+        }
+
+        return ['type' => 'review', 'step' => self::DONE, 'items' => $items];
     }
 
     /**
@@ -214,6 +239,7 @@ final class FlowEngine
         }
 
         $session->markCompleted();
+        $this->flow->fireCompleted($state->answers(), $session);
 
         return TurnResult::completed();
     }

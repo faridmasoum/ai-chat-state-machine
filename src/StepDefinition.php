@@ -1,6 +1,6 @@
 <?php
 
-namespace Farid\AiChatStateMachine;
+namespace FaridM\AiChatStateMachine;
 
 use Closure;
 
@@ -104,6 +104,9 @@ final class StepDefinition
         return $this;
     }
 
+    /**
+     * @param mixed $skipValue value stored when the user skips this step
+     */
     public function optional(bool $optional = true, $skipValue = null): self
     {
         $this->optional = $optional;

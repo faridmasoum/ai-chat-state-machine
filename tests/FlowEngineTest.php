@@ -1,15 +1,14 @@
 <?php
 
-namespace Farid\AiChatStateMachine\Tests;
+namespace FaridM\AiChatStateMachine\Tests;
 
-use Farid\AiChatStateMachine\ChatState;
-use Farid\AiChatStateMachine\Flow;
-use Farid\AiChatStateMachine\FlowEngine;
-use Farid\AiChatStateMachine\StepDefinition;
-use Farid\AiChatStateMachine\StepResult;
-use Farid\AiChatStateMachine\Support\ArraySession;
-use Farid\AiChatStateMachine\Turn;
-use Farid\AiChatStateMachine\TurnResult;
+use FaridM\AiChatStateMachine\Flow;
+use FaridM\AiChatStateMachine\FlowEngine;
+use FaridM\AiChatStateMachine\StepDefinition;
+use FaridM\AiChatStateMachine\StepResult;
+use FaridM\AiChatStateMachine\Support\ArraySession;
+use FaridM\AiChatStateMachine\Turn;
+use FaridM\AiChatStateMachine\TurnResult;
 use PHPUnit\Framework\TestCase;
 
 final class FlowEngineTest extends TestCase
@@ -88,7 +87,7 @@ final class FlowEngineTest extends TestCase
         $session = new ArraySession();
         $engine->start($session);
 
-        $this->expectException(\Farid\AiChatStateMachine\Exceptions\StepMismatchException::class);
+        $this->expectException(\FaridM\AiChatStateMachine\Exceptions\StepMismatchException::class);
         $engine->handleTurn($session, new Turn('email', Turn::TEXT, 'farid@example.com'));
     }
 

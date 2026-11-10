@@ -1,8 +1,8 @@
 <?php
 
-namespace Farid\AiChatStateMachine\Tests;
+namespace FaridM\AiChatStateMachine\Tests;
 
-use Farid\AiChatStateMachine\ChatState;
+use FaridM\AiChatStateMachine\ChatState;
 use PHPUnit\Framework\TestCase;
 
 final class ChatStateTest extends TestCase

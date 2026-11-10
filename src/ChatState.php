@@ -1,6 +1,6 @@
 <?php
 
-namespace Farid\AiChatStateMachine;
+namespace FaridM\AiChatStateMachine;
 
 /**
  * Typed wrapper over the JSON-serialisable state of one conversation.
