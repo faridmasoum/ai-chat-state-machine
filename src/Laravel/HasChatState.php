@@ -1,9 +1,9 @@
 <?php
 
-namespace Farid\AiChatStateMachine\Laravel;
+namespace FaridM\AiChatStateMachine\Laravel;
 
-use Farid\AiChatStateMachine\ChatState;
-use Farid\AiChatStateMachine\Contracts\ChatSession;
+use FaridM\AiChatStateMachine\ChatState;
+use FaridM\AiChatStateMachine\Contracts\ChatSession;
 
 /**
  * Drop this trait on any Eloquent model to make it satisfy the ChatSession

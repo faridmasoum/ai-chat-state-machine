@@ -1,0 +1,22 @@
+<?php
+
+namespace App\Chat;
+
+use FaridM\AiChatStateMachine\Contracts\FlowFactory;
+use FaridM\AiChatStateMachine\Flow;
+use FaridM\AiChatStateMachine\Steps;
+
+class LeadFlow implements FlowFactory
+{
+    public function make(?string $locale = null): Flow
+    {
+        // $locale is the language the visitor picked in the widget ("fa", "ar", ...).
+        // Use __() here if you want the questions translated too.
+        return Flow::make()
+            ->add(Steps::text('name', __('What is your name?')))
+            ->add(Steps::email('email', __('What is your email?')))
+            ->add(Steps::choice('topic', __('What can we help with?'), ['sales' => 'Sales', 'support' => 'Support']))
+            ->add(Steps::text('message', __('Anything else?'), ['multiline' => true])->optional());
+        // Save the answers by listening for FaridM\AiChatStateMachine\Laravel\FlowCompleted.
+    }
+}
