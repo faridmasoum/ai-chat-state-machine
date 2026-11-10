@@ -4,8 +4,12 @@
          bootstrap="vendor/autoload.php"
          colors="true">
     <testsuites>
-        <testsuite name="unit">
+        <testsuite name="core">
             <directory>tests</directory>
+            <exclude>tests/Laravel</exclude>
+        </testsuite>
+        <testsuite name="laravel">
+            <directory>tests/Laravel</directory>
         </testsuite>
     </testsuites>
     <source>

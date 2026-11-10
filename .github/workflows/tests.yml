@@ -20,12 +20,17 @@ jobs:
           php-version: ${{ matrix.php }}
           coverage: none
       # Laravel versions that run on PHP 8.0/8.1 are blocked by security advisories,
-      # so Testbench is only installed from PHP 8.2. The Laravel tests skip themselves without it.
+      # so Testbench is only installed from PHP 8.2. Only the core suite runs there.
       - name: Skip Laravel test tooling on PHP < 8.2
         if: matrix.php == '8.0' || matrix.php == '8.1'
         run: composer remove --dev orchestra/testbench --no-update
       - run: composer update --prefer-dist --no-interaction --no-progress
-      - run: vendor/bin/phpunit
+      - name: Tests (core + Laravel)
+        if: matrix.php != '8.0' && matrix.php != '8.1'
+        run: vendor/bin/phpunit
+      - name: Tests (core only)
+        if: matrix.php == '8.0' || matrix.php == '8.1'
+        run: vendor/bin/phpunit --testsuite core
 
   quality:
     runs-on: ubuntu-latest
