@@ -2,6 +2,11 @@
 
 namespace FaridM\AiChatStateMachine\Tests\Laravel;
 
+// Laravel integration tests need orchestra/testbench (installed on PHP 8.2+ in CI).
+if (!class_exists(\Orchestra\Testbench\TestCase::class)) {
+    return;
+}
+
 use FaridM\AiChatStateMachine\Contracts\FlowFactory;
 use FaridM\AiChatStateMachine\Flow;
 use FaridM\AiChatStateMachine\Laravel\AiChatStateMachineServiceProvider;
