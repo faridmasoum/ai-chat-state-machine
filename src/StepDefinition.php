@@ -70,6 +70,9 @@ final class StepDefinition
     /** @var bool */
     public $resetsFlow = false;
 
+    /** @var bool a detected change to this step always goes back and asks, never a deterministic correction */
+    public $confirmChanges = false;
+
     /** @var bool */
     public $confirmation = false;
 
@@ -248,6 +251,35 @@ final class StepDefinition
         $this->resetsFlow = $resets;
 
         return $this;
+    }
+
+    /**
+     * A detected change to this step always takes the go-back path (the user re-picks the
+     * value), never a deterministic correction, even when committing it would clear nothing.
+     */
+    public function confirmChanges(bool $confirm = true): self
+    {
+        $this->confirmChanges = $confirm;
+
+        return $this;
+    }
+
+    /**
+     * Would committing a new value for this step clear other existing answers
+     * (resetsFlow, or an answered step in `invalidates`)?
+     */
+    public function wouldClearOthers(ChatState $state): bool
+    {
+        if ($this->resetsFlow) {
+            return true;
+        }
+        foreach ($this->invalidates as $key) {
+            if ($state->has($key)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

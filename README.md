@@ -325,6 +325,7 @@ Every option below is optional and chainable on `StepDefinition` (or on any `Ste
 | `echo(fn(Turn, ChatState): string)` | How the user's turn appears in the transcript. Default: choice → option label, list → labels joined with `, `, skip → `Messages::skipped()`, text as typed. |
 | `acknowledge(fn($value, ChatState, bool $skipped): ?string)` | Text shown after the answer is accepted, before the next question. |
 | `prefillUsing(fn($raw, ChatState): StepResult)` | How a value for this step found in another step's input is parsed. Default: AI suggestions go through the step's own `parse` (plus `validate`); app-supplied prefill goes through `validate`. |
+| `confirmChanges()` | A detected change to this step always takes the go-back path (the user re-picks the value), never a deterministic correction. |
 | `section(string)` | Group on the review screen. |
 | `with($key, $value)` / `attribute($key, $default)` | Free attribute bag for your own data. |
 
@@ -524,7 +525,7 @@ Goal: every typed message is understood or explicitly clarified (never silently 
 
 1. **Deterministic parse.** The step's own `parse` runs first. A valid answer wins; the interpreter is not called.
 2. **ChangeDetector.** If you configured one and the step is not `INTERPRET_NONE`, it can say "this text is about an earlier step" ("sorry, budget is 80k").
-3. **Deterministic correction** (opt-in, `deterministicCorrections: true`). The text is parsed with the detected *target* step on a copy of the state. If it parses, passes `validate` and differs from the stored answer, it is committed as a correction (`invalidates`, `onChange`, `afterApply`, confirmations cleared, new epoch, `Messages::updated()`, `ConversationListener::corrected()`, a transcript event with source `detector`) and the chat continues from `nextStep()`, **without calling the interpreter**.
+3. **Deterministic correction** (opt-in, `deterministicCorrections: true`). The text is parsed with the detected *target* step on a copy of the state. If it parses, passes `validate`, differs from the stored answer **and committing it would not clear any other existing answer** (the target has no `resetsFlow` and none of its `invalidates` steps is answered, and it is not marked `confirmChanges()`), it is committed as a correction (`invalidates`, `onChange`, `afterApply`, confirmations cleared, new epoch, `Messages::updated()`, `ConversationListener::corrected()`, a transcript event with source `detector`) and the chat continues from `nextStep()`, **without calling the interpreter**.
 4. **Interpreter.** Consulted when the parse is `unrecognised` (full-mode steps), when a change was detected but could not be applied deterministically, or when your `InterpretationPolicy` says so. A failed or unhelpful call falls through to the next stage.
 5. **Clarify.** The step is asked again with the error (`Messages::fallback()` if the AI call failed), a side question is answered, or the flow goes back. `ConversationListener::unclear()` tells you when a message ended up here.
 
