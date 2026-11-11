@@ -3,6 +3,22 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] - 2026-11-11
+
+Backward compatible: every default equals the 2.0.1 behaviour.
+
+### Added
+- **Meta-only interpretation.** `StepDefinition::interpretable()` accepts a mode: `INTERPRET_FULL` (default, `true`), `INTERPRET_META`, `INTERPRET_NONE` (`false`). On a meta step the value is always the user's own text (`answers[current]`, AI prefill and AI corrections never touch it); applied corrections, a revisit, a detected change or a side question mean the text is not committed. The interpreter is only consulted there when the `InterpretationPolicy` says so or a change was detected. `StepDefinition::interpretMode()`.
+- **Interrupt steps understand free text.** Typed text on an interrupt goes through the ChangeDetector and the interpreter (same rules, interpret mode and `sensitive` respected); a side question is answered and the interrupt asked again (never handed off again); a correction or revisit ends the interrupt.
+- `StepResult::skip(?string $ack = null)`: a parse can decide the user declined; handled like a SKIP turn (invalid on a required step).
+- `StepResult::retry($error, $hint = [])`: an invalid answer that is not counted as an attempt (the listener's `invalid()` still fires).
+- **Deterministic corrections** (opt-in `deterministicCorrections` option on `FlowEngine` and `ChatEndpoint`, Laravel config `deterministic_corrections`): when the ChangeDetector names a target, the text is first parsed by the target step; a valid, different value is committed as a correction (transcript event source `detector`, `corrected()`, `Messages::updated()`) without calling the interpreter.
+- `ConversationListener::unclear($session, $step, $text, $reason)` (`ai_failed`, `ai_unhelpful`, `not_interpretable`; never for sensitive steps) and `ConversationListener::interpretationTimed($session, $step, $ms)`.
+- README: "Understanding every message" (the escalation order and how to use `InterpretationPolicy`).
+
+### Changed
+- The widget reports version 2.1.0.
+
 ## [2.0.1] - 2026-11-11
 
 ### Fixed

@@ -901,7 +901,7 @@ final class FlowEngine
                 continue;
             }
             $step = $this->flow->step($key);
-            if (!$step || $step->sensitive) {
+            if (!$step || $step->sensitive || $step->interpretMode() === StepDefinition::INTERPRET_META) {
                 continue;
             }
             $result = $step->stepPrefill($corrections[$key], $state, true);
@@ -938,6 +938,9 @@ final class FlowEngine
             $fromAi = !array_key_exists($key, $prefill);
             if (!array_key_exists($key, $prefill) && !array_key_exists($key, $aiAnswers)) {
                 continue;
+            }
+            if ($fromAi && $step->interpretMode() === StepDefinition::INTERPRET_META) {
+                continue; // a meta-only step's value is always the user's own text, never the AI's
             }
             if (!$step->stepApplies($state) || $state->has($key)) {
                 continue;
