@@ -11,7 +11,11 @@ final class TurnResult
 
     public const INVALID = 'invalid';
 
+    public const SUBMITTING = 'submitting';
+
     public const COMPLETED = 'completed';
+
+    public const ENDED = 'ended';
 
     /** @var string */
     public $status;
@@ -35,9 +39,19 @@ final class TurnResult
         return new self(self::INVALID, $error);
     }
 
+    public static function submitting(): self
+    {
+        return new self(self::SUBMITTING);
+    }
+
     public static function completed(): self
     {
         return new self(self::COMPLETED);
+    }
+
+    public static function ended(): self
+    {
+        return new self(self::ENDED);
     }
 
     public function isCompleted(): bool
@@ -48,5 +62,15 @@ final class TurnResult
     public function isInvalid(): bool
     {
         return $this->status === self::INVALID;
+    }
+
+    public function isSubmitting(): bool
+    {
+        return $this->status === self::SUBMITTING;
+    }
+
+    public function isEnded(): bool
+    {
+        return $this->status === self::ENDED;
     }
 }

@@ -12,7 +12,7 @@ namespace FaridM\StepChat;
  */
 final class ChatState
 {
-    public const VERSION = 1;
+    public const VERSION = 2;
 
     /** @var array<string, mixed> */
     private $answers = [];
@@ -20,8 +20,20 @@ final class ChatState
     /** @var array<string, mixed> free-form context that is not a step answer */
     private $meta = [];
 
-    /** @var list<array{step: string, epoch: int}> */
+    /** @var list<array{step: string, reason: string, epoch: int}> */
     private $askLog = [];
+
+    /** @var int total asks ever recorded (the log itself is capped) */
+    private $askTotal = 0;
+
+    /** @var array<string, array<string, mixed>> per-step data a step's ui closure can re-render with */
+    private $hints = [];
+
+    /** @var bool the conversation hit its turn limit */
+    private $ended = false;
+
+    /** @var bool the last deferred submission failed (offer a retry) */
+    private $submitFailed = false;
 
     /** @var array<string, int> */
     private $invalidAttempts = [];
@@ -45,7 +57,20 @@ final class ChatState
     {
         $this->answers = is_array($data['answers'] ?? null) ? $data['answers'] : [];
         $this->meta = is_array($data['meta'] ?? null) ? $data['meta'] : [];
-        $this->askLog = is_array($data['askLog'] ?? null) ? $data['askLog'] : [];
+        $this->askLog = [];
+        foreach (is_array($data['askLog'] ?? null) ? $data['askLog'] : [] as $entry) {
+            if (is_array($entry) && isset($entry['step'])) {
+                $this->askLog[] = [
+                    'step' => (string) $entry['step'],
+                    'reason' => is_string($entry['reason'] ?? null) ? $entry['reason'] : AskReason::NEXT,
+                    'epoch' => (int) ($entry['epoch'] ?? 0),
+                ];
+            }
+        }
+        $this->askTotal = (int) ($data['askTotal'] ?? count($this->askLog));
+        $this->hints = is_array($data['hints'] ?? null) ? $data['hints'] : [];
+        $this->ended = (bool) ($data['ended'] ?? false);
+        $this->submitFailed = (bool) ($data['submitFailed'] ?? false);
         $this->invalidAttempts = is_array($data['invalidAttempts'] ?? null) ? $data['invalidAttempts'] : [];
         $this->epoch = (int) ($data['epoch'] ?? 0);
         $this->editing = is_string($data['editing'] ?? null) ? $data['editing'] : null;
@@ -71,6 +96,10 @@ final class ChatState
             'answers' => $this->answers,
             'meta' => $this->meta,
             'askLog' => $this->askLog,
+            'askTotal' => $this->askTotal,
+            'hints' => $this->hints,
+            'ended' => $this->ended,
+            'submitFailed' => $this->submitFailed,
             'invalidAttempts' => $this->invalidAttempts,
             'epoch' => $this->epoch,
             'editing' => $this->editing,
@@ -104,7 +133,7 @@ final class ChatState
     public function forget(string ...$steps): void
     {
         foreach ($steps as $step) {
-            unset($this->answers[$step]);
+            unset($this->answers[$step], $this->hints[$step]);
         }
     }
 
@@ -120,6 +149,7 @@ final class ChatState
     {
         $this->answers = [];
         $this->meta = [];
+        $this->hints = [];
         $this->invalidAttempts = [];
         $this->editing = null;
         $this->bumpEpoch();
@@ -156,20 +186,100 @@ final class ChatState
         $this->epoch++;
     }
 
-    public function recordAsk(string $step): void
+    public function recordAsk(string $step, string $reason = AskReason::NEXT): void
     {
-        $this->askLog[] = ['step' => $step, 'epoch' => $this->epoch];
+        $this->askLog[] = ['step' => $step, 'reason' => $reason, 'epoch' => $this->epoch];
+        $this->askTotal++;
         if (count($this->askLog) > 400) {
             $this->askLog = array_slice($this->askLog, -400);
         }
     }
 
     /**
-     * @return list<array{step: string, epoch: int}>
+     * @return list<array{step: string, reason: string, epoch: int}>
      */
     public function askLog(): array
     {
         return $this->askLog;
+    }
+
+    public function askTotal(): int
+    {
+        return $this->askTotal;
+    }
+
+    /**
+     * Asks recorded after the log had $total entries (see askTotal()).
+     *
+     * @return list<array{step: string, reason: string, epoch: int}>
+     */
+    public function asksSince(int $total): array
+    {
+        $count = max(0, $this->askTotal - $total);
+
+        return $count === 0 ? [] : array_slice($this->askLog, -min($count, count($this->askLog)));
+    }
+
+    /** True when the step was already asked in the current epoch. */
+    public function askedInEpoch(string $step): bool
+    {
+        foreach ($this->askLog as $entry) {
+            if ($entry['step'] === $step && $entry['epoch'] === $this->epoch) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function hint(string $step): array
+    {
+        return $this->hints[$step] ?? [];
+    }
+
+    /**
+     * @param array<string, mixed> $hint
+     */
+    public function setHint(string $step, array $hint): void
+    {
+        if ($hint === []) {
+            unset($this->hints[$step]);
+        } else {
+            $this->hints[$step] = $hint;
+        }
+    }
+
+    public function clearHint(string $step): void
+    {
+        unset($this->hints[$step]);
+    }
+
+    public function clearHints(): void
+    {
+        $this->hints = [];
+    }
+
+    public function ended(): bool
+    {
+        return $this->ended;
+    }
+
+    public function markEnded(): void
+    {
+        $this->ended = true;
+    }
+
+    public function submitFailed(): bool
+    {
+        return $this->submitFailed;
+    }
+
+    public function setSubmitFailed(bool $failed): void
+    {
+        $this->submitFailed = $failed;
     }
 
     public function editing(): ?string
