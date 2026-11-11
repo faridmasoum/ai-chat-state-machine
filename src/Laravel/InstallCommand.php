@@ -1,24 +1,24 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Laravel;
+namespace FaridM\StepChat\Laravel;
 
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
 
 /**
- * php artisan ai-chat:install: publishes config + widget script and scaffolds a sample flow.
+ * php artisan stepchat:install: publishes config + widget script and scaffolds a sample flow.
  */
 class InstallCommand extends Command
 {
-    protected $signature = 'ai-chat:install {--force : Overwrite existing files}';
+    protected $signature = 'stepchat:install {--force : Overwrite existing files}';
 
     protected $description = 'Publish the config and widget script, and scaffold an example flow';
 
     public function handle(Filesystem $files): int
     {
         $force = (bool) $this->option('force');
-        $this->call('vendor:publish', ['--tag' => 'ai-chat-state-machine-config', '--force' => $force]);
-        $this->call('vendor:publish', ['--tag' => 'ai-chat-state-machine-assets', '--force' => true]);
+        $this->call('vendor:publish', ['--tag' => 'stepchat-config', '--force' => $force]);
+        $this->call('vendor:publish', ['--tag' => 'stepchat-assets', '--force' => true]);
 
         $target = app_path('Chat/LeadFlow.php');
         if ($files->exists($target) && !$force) {
@@ -31,9 +31,9 @@ class InstallCommand extends Command
 
         $this->newLine();
         $this->line('Next steps:');
-        $this->line('  1. Register the flow in config/ai-chat-state-machine.php:  widget.flows => [\'lead\' => App\\Chat\\LeadFlow::class]');
-        $this->line('  2. Add  AI_CHAT_WIDGET=true  to your .env');
-        $this->line('  3. Put  @aiChatWidget  just before </body> in your layout');
+        $this->line('  1. Register the flow in config/stepchat.php:  widget.flows => [\'lead\' => App\\Chat\\LeadFlow::class]');
+        $this->line('  2. Add  STEPCHAT_WIDGET=true  to your .env');
+        $this->line('  3. Put  @stepChatWidget  just before </body> in your layout');
 
         return self::SUCCESS;
     }

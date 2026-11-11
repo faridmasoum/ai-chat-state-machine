@@ -1,8 +1,8 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Laravel;
+namespace FaridM\StepChat\Laravel;
 
-use FaridM\AiChatStateMachine\Http\ChatEndpoint;
+use FaridM\StepChat\Http\ChatEndpoint;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 

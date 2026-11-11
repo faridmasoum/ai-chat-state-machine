@@ -1,8 +1,8 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Support;
+namespace FaridM\StepChat\Support;
 
-use FaridM\AiChatStateMachine\Contracts\SessionStore;
+use FaridM\StepChat\Contracts\SessionStore;
 
 /**
  * Per-process store. Meant for tests and demos; data is lost when the

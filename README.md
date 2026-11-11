@@ -1,10 +1,10 @@
 # AI Chat State Machine
 
-[![Latest Version](https://img.shields.io/packagist/v/faridm/ai-chat-state-machine.svg?style=flat-square)](https://packagist.org/packages/faridm/ai-chat-state-machine)
-[![Tests](https://img.shields.io/github/actions/workflow/status/faridmasoum/ai-chat-state-machine/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/faridmasoum/ai-chat-state-machine/actions)
-[![Total Downloads](https://img.shields.io/packagist/dt/faridm/ai-chat-state-machine.svg?style=flat-square)](https://packagist.org/packages/faridm/ai-chat-state-machine)
-[![PHP Version](https://img.shields.io/packagist/php-v/faridm/ai-chat-state-machine.svg?style=flat-square)](https://packagist.org/packages/faridm/ai-chat-state-machine)
-[![License](https://img.shields.io/packagist/l/faridm/ai-chat-state-machine.svg?style=flat-square)](LICENSE)
+[![Latest Version](https://img.shields.io/packagist/v/faridm/stepchat.svg?style=flat-square)](https://packagist.org/packages/faridm/stepchat)
+[![Tests](https://img.shields.io/github/actions/workflow/status/faridmasoum/stepchat/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/faridmasoum/stepchat/actions)
+[![Total Downloads](https://img.shields.io/packagist/dt/faridm/stepchat.svg?style=flat-square)](https://packagist.org/packages/faridm/stepchat)
+[![PHP Version](https://img.shields.io/packagist/php-v/faridm/stepchat.svg?style=flat-square)](https://packagist.org/packages/faridm/stepchat)
+[![License](https://img.shields.io/packagist/l/faridm/stepchat.svg?style=flat-square)](LICENSE)
 
 **Conversational forms that always finish, always validate, and never hallucinate your data.**
 
@@ -51,7 +51,7 @@ Hosted chat tools and "just prompt an LLM" bots are great at open-ended conversa
 ## Installation
 
 ```bash
-composer require faridm/ai-chat-state-machine
+composer require faridm/stepchat
 ```
 
 Requires PHP 8.0 or newer. There are no hard dependencies. The Laravel integration is used automatically when Laravel is present.
@@ -61,11 +61,11 @@ Requires PHP 8.0 or newer. There are no hard dependencies. The Laravel integrati
 A complete flow in a handful of lines, using the built-in step presets:
 
 ```php
-use FaridM\AiChatStateMachine\Flow;
-use FaridM\AiChatStateMachine\FlowEngine;
-use FaridM\AiChatStateMachine\Steps;
-use FaridM\AiChatStateMachine\Support\ArraySession;
-use FaridM\AiChatStateMachine\Turn;
+use FaridM\StepChat\Flow;
+use FaridM\StepChat\FlowEngine;
+use FaridM\StepChat\Steps;
+use FaridM\StepChat\Support\ArraySession;
+use FaridM\StepChat\Turn;
 
 $flow = Flow::make()
     ->add(Steps::text('name', 'What is your name?'))
@@ -102,29 +102,29 @@ The widget is optional. It is a single dependency-free JavaScript file (Shadow D
 ### Laravel: three steps
 
 ```bash
-composer require faridm/ai-chat-state-machine
-php artisan ai-chat:install        # publishes config + script, scaffolds app/Chat/LeadFlow.php
+composer require faridm/stepchat
+php artisan stepchat:install        # publishes config + script, scaffolds app/Chat/LeadFlow.php
 ```
 
-1. Register the flow in `config/ai-chat-state-machine.php`:
+1. Register the flow in `config/stepchat.php`:
    ```php
    'widget' => ['flows' => ['lead' => App\Chat\LeadFlow::class]],
    ```
 2. Enable it in `.env`:
    ```
-   AI_CHAT_WIDGET=true
+   STEPCHAT_WIDGET=true
    ```
 3. Add one line to your layout, just before `</body>`:
    ```blade
-   @aiChatWidget
+   @stepChatWidget
    ```
 
-Done. The route, caching of conversations, CSRF handling and the script tag are all taken care of. Options per call: `@aiChatWidget('lead', ['lang' => 'fa', 'color' => '#0ea5e9'])` or `<x-ai-chat-widget flow="lead" lang="ar" />`.
+Done. The route, caching of conversations, CSRF handling and the script tag are all taken care of. Options per call: `@stepChatWidget('lead', ['lang' => 'fa', 'color' => '#0ea5e9'])` or `<x-stepchat-widget flow="lead" lang="ar" />`.
 
 Save the result by listening for the event:
 
 ```php
-use FaridM\AiChatStateMachine\Laravel\FlowCompleted;
+use FaridM\StepChat\Laravel\FlowCompleted;
 
 Event::listen(FlowCompleted::class, fn ($e) => Lead::create($e->answers));
 ```
@@ -136,11 +136,11 @@ Event::listen(FlowCompleted::class, fn ($e) => Lead::create($e->answers));
 ```php
 require __DIR__ . '/vendor/autoload.php';
 
-use FaridM\AiChatStateMachine\Flow;
-use FaridM\AiChatStateMachine\Http\ChatEndpoint;
-use FaridM\AiChatStateMachine\Http\FlowRegistry;
-use FaridM\AiChatStateMachine\Steps;
-use FaridM\AiChatStateMachine\Support\NativeSessionStore;
+use FaridM\StepChat\Flow;
+use FaridM\StepChat\Http\ChatEndpoint;
+use FaridM\StepChat\Http\FlowRegistry;
+use FaridM\StepChat\Steps;
+use FaridM\StepChat\Support\NativeSessionStore;
 
 $flows = (new FlowRegistry())->register('lead', fn () => Flow::make()
     ->add(Steps::text('name', 'What is your name?'))
@@ -153,7 +153,7 @@ $flows = (new FlowRegistry())->register('lead', fn () => Flow::make()
 Then on any page:
 
 ```html
-<script src="/path/to/ai-chat-widget.js"
+<script src="/path/to/stepchat-widget.js"
         data-endpoint="/endpoint.php" data-flow="lead" defer></script>
 ```
 
@@ -161,10 +161,10 @@ A runnable version lives in [`examples/plain-php`](examples/plain-php): run `php
 
 ### Any site, via CDN
 
-Copy the file from `resources/dist/ai-chat-widget.js` or load it straight from GitHub through jsDelivr:
+Copy the file from `resources/dist/stepchat-widget.js` or load it straight from GitHub through jsDelivr:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/faridmasoum/ai-chat-state-machine@v1.0.0/resources/dist/ai-chat-widget.js"
+<script src="https://cdn.jsdelivr.net/gh/faridmasoum/stepchat@v1.0.1/resources/dist/stepchat-widget.js"
         data-endpoint="https://your-api.example.com/chat" data-flow="lead" defer></script>
 ```
 
@@ -192,9 +192,9 @@ The endpoint can be anything that speaks the [HTTP protocol](#http-protocol) (fo
 ### JavaScript API
 
 ```html
-<script src="ai-chat-widget.js"></script>
+<script src="stepchat-widget.js"></script>
 <script>
-  const chat = AiChatWidget.mount({
+  const chat = StepChatWidget.mount({
     endpoint: '/endpoint.php',
     flow: 'lead',
     lang: 'auto',
@@ -224,13 +224,13 @@ document.addEventListener('acw:complete', (e) => gtag('event', 'lead', { flow: e
 - **Add any language** (UI strings fall back to English for missing keys):
 
 ```js
-AiChatWidget.addLocale('sv', {
+StepChatWidget.addLocale('sv', {
   title: 'Chatt', send: 'Skicka', skip: 'Hoppa över', edit: 'Redigera',
   submit: 'Skicka in', placeholder: 'Skriv ditt svar…',
   done: 'Tack! Dina svar har skickats.',
 }, { name: 'Svenska', dir: 'ltr' });
 
-AiChatWidget.addLocale('ckb', { title: 'گفتوگۆ' }, { name: 'کوردی', dir: 'rtl' });
+StepChatWidget.addLocale('ckb', { title: 'گفتوگۆ' }, { name: 'کوردی', dir: 'rtl' });
 ```
 
 Localising the *questions* happens on your server, where you build the flow. The `$locale` argument is the language the visitor picked:
@@ -285,9 +285,9 @@ Flow::make()
 For anything the presets don't cover, write your own rules. The engine never needs a model for this:
 
 ```php
-use FaridM\AiChatStateMachine\StepDefinition;
-use FaridM\AiChatStateMachine\StepResult;
-use FaridM\AiChatStateMachine\Turn;
+use FaridM\StepChat\StepDefinition;
+use FaridM\StepChat\StepResult;
+use FaridM\StepChat\Turn;
 
 StepDefinition::make('budget', 'What is your monthly budget (USD)?')
     ->ui(fn ($state) => ['type' => 'text', 'inputType' => 'number', 'min' => 100])
@@ -323,9 +323,9 @@ StepDefinition::make('budget', 'What is your monthly budget (USD)?')
 Implement one interface to let a model interpret free text **only** where your deterministic rules return `StepResult::unrecognised()` (as opposed to `invalid()`):
 
 ```php
-use FaridM\AiChatStateMachine\ChatState;
-use FaridM\AiChatStateMachine\Contracts\TurnInterpreter;
-use FaridM\AiChatStateMachine\Interpretation;
+use FaridM\StepChat\ChatState;
+use FaridM\StepChat\Contracts\TurnInterpreter;
+use FaridM\StepChat\Interpretation;
 
 final class LlmInterpreter implements TurnInterpreter
 {
@@ -354,19 +354,19 @@ Guarantees that keep it safe:
 Everything is opt-in; the package works in Laravel 8 to 12 through auto-discovery.
 
 ```bash
-php artisan vendor:publish --tag=ai-chat-state-machine-config   # config/ai-chat-state-machine.php
-php artisan vendor:publish --tag=ai-chat-state-machine-assets   # public/vendor/ai-chat-state-machine/ai-chat-widget.js
-php artisan ai-chat:install                                      # both of the above + a sample flow
+php artisan vendor:publish --tag=stepchat-config   # config/stepchat.php
+php artisan vendor:publish --tag=stepchat-assets   # public/vendor/stepchat/stepchat-widget.js
+php artisan stepchat:install                                      # both of the above + a sample flow
 ```
 
-Without publishing the assets, `@aiChatWidget` loads the script from the jsDelivr CDN. Conversations are stored in your cache (`cache_store`, `session_ttl` in the config), so they survive page reloads on any cache driver.
+Without publishing the assets, `@stepChatWidget` loads the script from the jsDelivr CDN. Conversations are stored in your cache (`cache_store`, `session_ttl` in the config), so they survive page reloads on any cache driver.
 
 ### Persisting conversations in your database
 
 To keep sessions in Eloquent instead (for your own back-office, analytics or hand-over to a human), use the trait:
 
 ```php
-use FaridM\AiChatStateMachine\Laravel\HasChatState;
+use FaridM\StepChat\Laravel\HasChatState;
 
 class ChatSession extends Model
 {

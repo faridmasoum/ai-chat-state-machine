@@ -1,9 +1,9 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Support;
+namespace FaridM\StepChat\Support;
 
-use FaridM\AiChatStateMachine\ChatState;
-use FaridM\AiChatStateMachine\Contracts\ChatSession;
+use FaridM\StepChat\ChatState;
+use FaridM\StepChat\Contracts\ChatSession;
 
 /**
  * Minimal, storage-agnostic ChatSession. Useful for tests, CLI demos, or any

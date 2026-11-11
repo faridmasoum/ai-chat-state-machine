@@ -9,11 +9,11 @@
 
 require __DIR__ . '/../../vendor/autoload.php';
 
-use FaridM\AiChatStateMachine\Flow;
-use FaridM\AiChatStateMachine\Http\ChatEndpoint;
-use FaridM\AiChatStateMachine\Http\FlowRegistry;
-use FaridM\AiChatStateMachine\Steps;
-use FaridM\AiChatStateMachine\Support\NativeSessionStore;
+use FaridM\StepChat\Flow;
+use FaridM\StepChat\Http\ChatEndpoint;
+use FaridM\StepChat\Http\FlowRegistry;
+use FaridM\StepChat\Steps;
+use FaridM\StepChat\Support\NativeSessionStore;
 
 $flows = (new FlowRegistry())->register('lead', static function (?string $locale): Flow {
     // The widget sends the visitor's chosen language, so the questions can follow it.
@@ -47,7 +47,7 @@ $flows = (new FlowRegistry())->register('lead', static function (?string $locale
         ->add(Steps::text('note', $t['note'], ['multiline' => true])->optional())
         ->onComplete(static function (array $answers): void {
             // Save to a database, send an email, call your CRM...
-            file_put_contents(sys_get_temp_dir() . '/ai-chat-leads.jsonl', json_encode($answers, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND);
+            file_put_contents(sys_get_temp_dir() . '/stepchat-leads.jsonl', json_encode($answers, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND);
         });
 });
 

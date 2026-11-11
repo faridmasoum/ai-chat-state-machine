@@ -1,11 +1,11 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Laravel;
+namespace FaridM\StepChat\Laravel;
 
 use Illuminate\View\Component;
 
 /**
- * <x-ai-chat-widget flow="lead" lang="fa" />
+ * <x-stepchat-widget flow="lead" lang="fa" />
  */
 class WidgetComponent extends Component
 {

@@ -1,8 +1,8 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Tests;
+namespace FaridM\StepChat\Tests;
 
-use FaridM\AiChatStateMachine\ChatState;
+use FaridM\StepChat\ChatState;
 use PHPUnit\Framework\TestCase;
 
 final class ChatStateTest extends TestCase

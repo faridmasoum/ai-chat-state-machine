@@ -1,8 +1,8 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Contracts;
+namespace FaridM\StepChat\Contracts;
 
-use FaridM\AiChatStateMachine\ChatState;
+use FaridM\StepChat\ChatState;
 
 /**
  * Whatever persists a conversation between turns: an Eloquent model, a cache

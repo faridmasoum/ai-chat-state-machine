@@ -3,9 +3,10 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.1] - 2026-11-11
 
 ### Changed
+- **Renamed to StepChat** (the "AI" in the old name was misleading, since the AI model is optional). Composer package `faridm/stepchat`, namespace `FaridM\StepChat`, config `config/stepchat.php`, widget file `stepchat-widget.js` and global `StepChatWidget`, `@stepChatWidget` / `<x-stepchat-widget>`, `php artisan stepchat:install`, env `STEPCHAT_WIDGET`. GitHub repository is now `faridmasoum/stepchat`. The old package name `faridm/ai-chat-state-machine` is abandoned.
 - Plain PHP example now localizes plan and topic labels (Persian, Arabic, English), so the README screenshots show fully English and fully Arabic conversations.
 
 ## [1.0.0] - 2026-11-10

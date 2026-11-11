@@ -1,6 +1,6 @@
 <?php
 
-namespace FaridM\AiChatStateMachine;
+namespace FaridM\StepChat;
 
 use Closure;
 

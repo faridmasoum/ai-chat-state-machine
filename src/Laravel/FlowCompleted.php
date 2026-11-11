@@ -1,6 +1,6 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Laravel;
+namespace FaridM\StepChat\Laravel;
 
 /**
  * Dispatched when a visitor submits a finished flow through the widget.

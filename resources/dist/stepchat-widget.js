@@ -1,7 +1,7 @@
 /*!
  * AI Chat State Machine - browser widget v1.0.0
  * Zero dependencies, no build step. MIT licensed.
- * https://github.com/faridmasoum/ai-chat-state-machine
+ * https://github.com/faridmasoum/stepchat
  */
 (function (global) {
   'use strict';
@@ -143,7 +143,7 @@
 
   /**
    * Register or extend a language. Missing keys fall back to English.
-   * AiChatWidget.addLocale('sv', {title: 'Chatt', ...}, {dir: 'ltr', name: 'Svenska'})
+   * StepChatWidget.addLocale('sv', {title: 'Chatt', ...}, {dir: 'ltr', name: 'Svenska'})
    */
   function addLocale(code, messages, meta) {
     var key = String(code).toLowerCase().replace(/_/g, '-');
@@ -643,10 +643,10 @@
   // ------------------------------------------------------------- public API
   var instances = [];
 
-  var AiChatWidget = {
+  var StepChatWidget = {
     version: VERSION,
     mount: function (opts) {
-      if (!opts || !opts.endpoint) { throw new Error('AiChatWidget.mount: "endpoint" is required.'); }
+      if (!opts || !opts.endpoint) { throw new Error('StepChatWidget.mount: "endpoint" is required.'); }
       var w = new Widget(opts);
       instances.push(w);
       return {
@@ -660,7 +660,7 @@
     locales: function () { return Object.keys(LOCALES); }
   };
 
-  global.AiChatWidget = AiChatWidget;
+  global.StepChatWidget = StepChatWidget;
 
   // ------------------------------------------------- one-line script-tag mode
   function autoMount() {
@@ -668,7 +668,7 @@
     if (!tag || !tag.getAttribute('data-endpoint')) { return; }
     var d = function (k) { var v = tag.getAttribute('data-' + k); return v === null ? undefined : v; };
     var run = function () {
-      AiChatWidget.mount({
+      StepChatWidget.mount({
         endpoint: d('endpoint'), flow: d('flow'), lang: d('lang') || 'auto', dir: d('dir'),
         theme: d('theme'), title: d('title'), position: d('position'), mode: d('mode'), target: d('target'),
         open: d('open') === 'true', csrf: d('csrf'),

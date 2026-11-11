@@ -31,24 +31,24 @@ return [
     | Browser chat widget (optional)
     |--------------------------------------------------------------------------
     |
-    | Off by default. Set AI_CHAT_WIDGET=true, register at least one flow
-    | below, then put @aiChatWidget in your layout. That's the whole install.
+    | Off by default. Set STEPCHAT_WIDGET=true, register at least one flow
+    | below, then put @stepChatWidget in your layout. That's the whole install.
     |
     */
     'widget' => [
-        'enabled' => env('AI_CHAT_WIDGET', false),
+        'enabled' => env('STEPCHAT_WIDGET', false),
 
         // JSON endpoint the widget talks to: POST /{route_prefix}/{flow}
         'route_prefix' => 'chat-flow',
         'middleware' => ['web', 'throttle:60,1'],
 
-        // name => class implementing FaridM\AiChatStateMachine\Contracts\FlowFactory
+        // name => class implementing FaridM\StepChat\Contracts\FlowFactory
         'flows' => [
             // 'lead' => App\Chat\LeadFlow::class,
         ],
         'default_flow' => 'lead',
 
-        // Presentation. Every key can be overridden per call: @aiChatWidget('lead', ['lang' => 'fa'])
+        // Presentation. Every key can be overridden per call: @stepChatWidget('lead', ['lang' => 'fa'])
         'lang' => 'auto',          // "auto" (visitor's browser language), or any code: en, fa, ar, he, ur...
         'dir' => 'auto',           // "auto" (RTL detected from the language), "ltr" or "rtl"
         'theme' => 'auto',         // auto | light | dark

@@ -1,5 +1,5 @@
 {
-    "name": "faridm/ai-chat-state-machine",
+    "name": "faridm/stepchat",
     "description": "A deterministic, framework-agnostic state machine for step-by-step chat flows (lead forms, support bots, onboarding wizards) in PHP: validated server-side, optional AI fallback, with a drop-in multilingual (RTL-ready) browser widget and Laravel integration.",
     "type": "library",
     "license": "MIT",
@@ -19,7 +19,7 @@
         "laravel",
         "php"
     ],
-    "homepage": "https://github.com/faridmasoum/ai-chat-state-machine",
+    "homepage": "https://github.com/faridmasoum/stepchat",
     "readme": "README.md",
     "authors": [
         {
@@ -41,18 +41,18 @@
     },
     "autoload": {
         "psr-4": {
-            "FaridM\\AiChatStateMachine\\": "src/"
+            "FaridM\\StepChat\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "FaridM\\AiChatStateMachine\\Tests\\": "tests/"
+            "FaridM\\StepChat\\Tests\\": "tests/"
         }
     },
     "extra": {
         "laravel": {
             "providers": [
-                "FaridM\\AiChatStateMachine\\Laravel\\AiChatStateMachineServiceProvider"
+                "FaridM\\StepChat\\Laravel\\StepChatServiceProvider"
             ]
         }
     },
@@ -62,8 +62,8 @@
         "allow-plugins": {}
     },
     "support": {
-        "issues": "https://github.com/faridmasoum/ai-chat-state-machine/issues",
-        "source": "https://github.com/faridmasoum/ai-chat-state-machine"
+        "issues": "https://github.com/faridmasoum/stepchat/issues",
+        "source": "https://github.com/faridmasoum/stepchat"
     },
     "scripts": {
         "test": "phpunit",

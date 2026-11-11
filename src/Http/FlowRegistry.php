@@ -1,10 +1,10 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Http;
+namespace FaridM\StepChat\Http;
 
 use Closure;
-use FaridM\AiChatStateMachine\Contracts\FlowFactory;
-use FaridM\AiChatStateMachine\Flow;
+use FaridM\StepChat\Contracts\FlowFactory;
+use FaridM\StepChat\Flow;
 use InvalidArgumentException;
 
 /**

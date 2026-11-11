@@ -1,12 +1,12 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Tests;
+namespace FaridM\StepChat\Tests;
 
-use FaridM\AiChatStateMachine\Flow;
-use FaridM\AiChatStateMachine\Http\ChatEndpoint;
-use FaridM\AiChatStateMachine\Http\FlowRegistry;
-use FaridM\AiChatStateMachine\Steps;
-use FaridM\AiChatStateMachine\Support\InMemorySessionStore;
+use FaridM\StepChat\Flow;
+use FaridM\StepChat\Http\ChatEndpoint;
+use FaridM\StepChat\Http\FlowRegistry;
+use FaridM\StepChat\Steps;
+use FaridM\StepChat\Support\InMemorySessionStore;
 use PHPUnit\Framework\TestCase;
 
 final class ChatEndpointTest extends TestCase

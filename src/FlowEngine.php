@@ -1,11 +1,11 @@
 <?php
 
-namespace FaridM\AiChatStateMachine;
+namespace FaridM\StepChat;
 
-use FaridM\AiChatStateMachine\Contracts\ChatSession;
-use FaridM\AiChatStateMachine\Contracts\TurnInterpreter;
-use FaridM\AiChatStateMachine\Exceptions\InvalidTurnException;
-use FaridM\AiChatStateMachine\Exceptions\StepMismatchException;
+use FaridM\StepChat\Contracts\ChatSession;
+use FaridM\StepChat\Contracts\TurnInterpreter;
+use FaridM\StepChat\Exceptions\InvalidTurnException;
+use FaridM\StepChat\Exceptions\StepMismatchException;
 
 /**
  * Deterministic, server-controlled conversation flow.

@@ -1,8 +1,8 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Contracts;
+namespace FaridM\StepChat\Contracts;
 
-use FaridM\AiChatStateMachine\Support\ArraySession;
+use FaridM\StepChat\Support\ArraySession;
 
 /**
  * Where conversations live between HTTP requests (PHP session, cache, Redis,

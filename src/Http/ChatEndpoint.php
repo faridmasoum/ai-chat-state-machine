@@ -1,15 +1,15 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Http;
+namespace FaridM\StepChat\Http;
 
-use FaridM\AiChatStateMachine\Contracts\SessionStore;
-use FaridM\AiChatStateMachine\Contracts\TurnInterpreter;
-use FaridM\AiChatStateMachine\Exceptions\InvalidTurnException;
-use FaridM\AiChatStateMachine\Exceptions\StepMismatchException;
-use FaridM\AiChatStateMachine\FlowEngine;
-use FaridM\AiChatStateMachine\Support\ArraySession;
-use FaridM\AiChatStateMachine\Turn;
-use FaridM\AiChatStateMachine\TurnResult;
+use FaridM\StepChat\Contracts\SessionStore;
+use FaridM\StepChat\Contracts\TurnInterpreter;
+use FaridM\StepChat\Exceptions\InvalidTurnException;
+use FaridM\StepChat\Exceptions\StepMismatchException;
+use FaridM\StepChat\FlowEngine;
+use FaridM\StepChat\Support\ArraySession;
+use FaridM\StepChat\Turn;
+use FaridM\StepChat\TurnResult;
 
 /**
  * Framework-agnostic JSON protocol spoken by the browser widget.
