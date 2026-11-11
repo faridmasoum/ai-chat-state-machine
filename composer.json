@@ -19,7 +19,7 @@
         "laravel",
         "php"
     ],
-    "homepage": "https://github.com/faridmasoum/ai-chat-state-machine",
+    "homepage": "https://github.com/faridmasoum/stepchat",
     "readme": "README.md",
     "authors": [
         {
@@ -62,8 +62,8 @@
         "allow-plugins": {}
     },
     "support": {
-        "issues": "https://github.com/faridmasoum/ai-chat-state-machine/issues",
-        "source": "https://github.com/faridmasoum/ai-chat-state-machine"
+        "issues": "https://github.com/faridmasoum/stepchat/issues",
+        "source": "https://github.com/faridmasoum/stepchat"
     },
     "scripts": {
         "test": "phpunit",

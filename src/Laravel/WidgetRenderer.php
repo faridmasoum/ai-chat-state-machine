@@ -75,6 +75,6 @@ class WidgetRenderer
             return asset('vendor/ai-chat-state-machine/ai-chat-widget.js');
         }
 
-        return 'https://cdn.jsdelivr.net/gh/faridmasoum/ai-chat-state-machine@v' . self::VERSION . '/resources/dist/ai-chat-widget.js';
+        return 'https://cdn.jsdelivr.net/gh/faridmasoum/stepchat@v' . self::VERSION . '/resources/dist/ai-chat-widget.js';
     }
 }

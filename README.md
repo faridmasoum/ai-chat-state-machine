@@ -1,7 +1,7 @@
 # AI Chat State Machine
 
 [![Latest Version](https://img.shields.io/packagist/v/faridm/ai-chat-state-machine.svg?style=flat-square)](https://packagist.org/packages/faridm/ai-chat-state-machine)
-[![Tests](https://img.shields.io/github/actions/workflow/status/faridmasoum/ai-chat-state-machine/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/faridmasoum/ai-chat-state-machine/actions)
+[![Tests](https://img.shields.io/github/actions/workflow/status/faridmasoum/stepchat/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/faridmasoum/stepchat/actions)
 [![Total Downloads](https://img.shields.io/packagist/dt/faridm/ai-chat-state-machine.svg?style=flat-square)](https://packagist.org/packages/faridm/ai-chat-state-machine)
 [![PHP Version](https://img.shields.io/packagist/php-v/faridm/ai-chat-state-machine.svg?style=flat-square)](https://packagist.org/packages/faridm/ai-chat-state-machine)
 [![License](https://img.shields.io/packagist/l/faridm/ai-chat-state-machine.svg?style=flat-square)](LICENSE)
@@ -164,7 +164,7 @@ A runnable version lives in [`examples/plain-php`](examples/plain-php): run `php
 Copy the file from `resources/dist/ai-chat-widget.js` or load it straight from GitHub through jsDelivr:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/faridmasoum/ai-chat-state-machine@v1.0.0/resources/dist/ai-chat-widget.js"
+<script src="https://cdn.jsdelivr.net/gh/faridmasoum/stepchat@v1.0.0/resources/dist/ai-chat-widget.js"
         data-endpoint="https://your-api.example.com/chat" data-flow="lead" defer></script>
 ```
 

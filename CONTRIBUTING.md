@@ -5,8 +5,8 @@ Thanks for helping! Bug reports, ideas and pull requests are all welcome.
 ## Setup
 
 ```bash
-git clone https://github.com/faridmasoum/ai-chat-state-machine.git
-cd ai-chat-state-machine
+git clone https://github.com/faridmasoum/stepchat.git
+cd stepchat
 composer install
 ```
 

@@ -1,7 +1,7 @@
 /*!
  * AI Chat State Machine - browser widget v1.0.0
  * Zero dependencies, no build step. MIT licensed.
- * https://github.com/faridmasoum/ai-chat-state-machine
+ * https://github.com/faridmasoum/stepchat
  */
 (function (global) {
   'use strict';
