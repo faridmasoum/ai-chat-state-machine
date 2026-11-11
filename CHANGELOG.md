@@ -3,6 +3,11 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- README screenshots retaken at 2x resolution with native names: an English name in the English one, an Arabic name in the Arabic one.
+
 ## [1.0.1] - 2026-11-11
 
 ### Changed
