@@ -206,13 +206,18 @@ final class ChatEndpoint
             }
         }
 
+        $ui = $engine->ui($session);
+        if ($ui['type'] === 'ended' && $status === 'continue') {
+            $status = 'ended';
+        }
+
         return [
             'status' => 200,
             'body' => [
                 'session' => $id,
                 'status' => $status,
                 'step' => $session->currentStep(),
-                'ui' => $engine->ui($session),
+                'ui' => $ui,
                 'progress' => $engine->progress($session),
                 'summary' => $summary,
                 'error' => $result !== null && $result->isInvalid() ? $result->error : null,

@@ -27,8 +27,14 @@ interface Messages
 
     public function turnLimitReached(): string;
 
-    /** Lead-in when the conversation goes back to an earlier step ('' when it has no answer yet). */
-    public function goingBack(string $currentAnswerDisplay): string;
+    /**
+     * Lead-in when the conversation goes back to an earlier step. Return '' for no lead-in
+     * (e.g. for a plain edit).
+     *
+     * @param string $currentAnswerDisplay display of the target's current answer ('' when it has none)
+     * @param string $source detector|ai|ai_correction|edit
+     */
+    public function goingBack(string $currentAnswerDisplay, string $source): string;
 
     /**
      * Lead-in after earlier answers were corrected.

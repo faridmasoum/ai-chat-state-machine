@@ -25,6 +25,11 @@ final class RecordingListener extends ConversationListener
         $this->events[] = 'interpreted';
     }
 
+    public function corrected(ChatSession $session, string $step, $old, $new): void
+    {
+        $this->events[] = sprintf('corrected:%s:%s>%s', $step, json_encode($old), json_encode($new));
+    }
+
     public function wentBack(ChatSession $session, string $from, string $to, string $source): void
     {
         $this->events[] = "wentBack:$from>$to:$source";

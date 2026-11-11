@@ -612,6 +612,7 @@
       return;
     }
 
+    if (type === 'ended' && ui.text) { c.appendChild(el('div', 'hint', ui.text)); }
     if (type === 'done' || type === 'ended') {
       var again = el('button', 'btn ghost', this.t('restart')); again.type = 'button';
       again.addEventListener('click', function () { self.restart(); });

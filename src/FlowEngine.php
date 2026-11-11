@@ -319,7 +319,7 @@ final class FlowEngine
         $state->setEditing($target);
         $next = $this->nextStep($state);
 
-        $this->leadIn($this->messages->goingBack($display), 'info');
+        $this->leadIn($this->messages->goingBack($display, $source), 'info');
         $this->transcript->event($session, $from, sprintf('go back from "%s" to "%s" (source: %s)', $from, $target, $source));
         $this->listener->wentBack($session, $from, $target, $source);
         $this->ask($session, $state, $next, $source === 'edit' ? AskReason::EDIT : AskReason::GOBACK);
@@ -425,9 +425,11 @@ final class FlowEngine
 
         // c) corrections of earlier answers.
         $failedCorrections = [];
+        $applied = false;
         if ($interp && $interp->corrections() !== []) {
             [$labels, $failedCorrections] = $this->applyCorrections($session, $state, $key, $interp->corrections());
             if ($labels !== []) {
+                $applied = true;
                 $this->addReply($interp);
                 $this->clearConfirmations($state);
                 $state->bumpEpoch();
@@ -440,8 +442,12 @@ final class FlowEngine
             }
         }
 
-        // d) go back to an earlier step.
-        if ($detected !== null || !$parsed->ok) {
+        // d) go back to an earlier step: the detector found a change, the current answer is unusable,
+        //    or the interpretation is a correction/revisit that could not be applied (even if the
+        //    current text also parsed: then it is NOT committed).
+        $wantsRevisit = $interp !== null && !$applied
+            && ($interp->intent() === Interpretation::CORRECTION || $interp->revisit() !== null);
+        if ($detected !== null || !$parsed->ok || $wantsRevisit) {
             $target = $detected;
             $source = 'detector';
             if ($target === null && $interp) {
@@ -659,8 +665,10 @@ final class FlowEngine
             $state->bumpEpoch();
         }
 
-        if ($changed) {
-            if ($differs && $step->resetsFlow) {
+        // Dependents and confirmations are only cleared when an EXISTING answer changes,
+        // never on a step's first answer (same rule as onChange).
+        if ($differs) {
+            if ($step->resetsFlow) {
                 $state->resetAnswers();
                 $state->setAnswer($key, $value);
             } elseif ($step->invalidates) {
@@ -722,8 +730,11 @@ final class FlowEngine
             if (ChatState::same($state->answer($key), $result->value)) {
                 continue;
             }
+            $old = $state->answer($key);
             $this->commit($session, $state, $step, $result->value);
             $labels[] = $step->label;
+            $this->transcript->event($session, $current, sprintf('correction "%s" (source: ai_correction)', $key));
+            $this->listener->corrected($session, $key, $old, $result->value);
         }
 
         return [$labels, $failed];
@@ -918,7 +929,7 @@ final class FlowEngine
 
         if ($session->isCompleted()) {
             $ui = ['type' => 'done', 'step' => self::DONE];
-        } elseif ($state->ended()) {
+        } elseif ($state->ended() || $session->turnCount() >= $this->maxTurns) {
             $ui = ['type' => 'ended', 'text' => $this->messages->turnLimitReached(), 'step' => $key];
         } elseif ($key === self::DONE) {
             $ui = $this->review($state) + ['step' => self::DONE];

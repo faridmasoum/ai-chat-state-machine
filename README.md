@@ -315,7 +315,7 @@ Every option below is optional and chainable on `StepDefinition` (or on any `Ste
 | `editable(bool)` | Non-editable steps cannot be targeted by edit turns, corrections or go-back; review items expose `editable`. |
 | `allowsEdits()` | EDIT turns are accepted while this step is current (besides from the review/done screen). |
 | `afterApply(fn(ChatState, $value))` | Runs after **any** commit of the step: direct answer, prefill, AI correction, interrupt. |
-| `onChange(fn(ChatState, $old, $new))` | Runs only when an existing answer changes to a different value, after `invalidates` cleared dependents. |
+| `onChange(fn(ChatState, $old, $new))` | Runs only when an existing answer changes to a different value, after `invalidates` cleared dependents. `invalidates`, `resetsFlow` and confirmation clearing follow the same rule: they never fire on a step's first answer. |
 | `resetsFlow()` | Changing an existing answer clears every other answer (the form restarts). |
 | `confirmation()` | The answer only confirms earlier ones (review, consent). It is cleared automatically whenever another answer changes, an edit starts or a go-back happens, so it is asked again. |
 | `revalidate(false)` | The invariant checker keeps the stored answer even if `validate` fails later. |
@@ -365,7 +365,7 @@ Every user-facing string the engine writes comes from `Contracts\Messages`. `Sup
 final class FrenchMessages extends EnglishMessages
 {
     public function required(): string { return 'Cette étape est obligatoire.'; }
-    public function goingBack(string $current): string { return $current === '' ? "D'accord, modifions cela." : "D'accord, c'était « $current »."; }
+    public function goingBack(string $current, string $source): string { return $source === 'edit' ? '' : "D'accord, modifions cela."; }  // '' = no lead-in
 }
 $engine = new FlowEngine($flow, messages: new FrenchMessages());
 ```
@@ -389,7 +389,7 @@ StepDefinition::make('review', 'Review')
 
 ## Go back and change detection
 
-`Contracts\ChangeDetector::detect($text, $currentStep, $state): ?string` is an optional, deterministic hook ("actually it's a Toyota", "go back") that returns the step to reopen; it needs no AI and `Flow::revisitable($state, $current)` lists valid targets. `FlowEngine::goBack($session, $state, $from, $target, $leadIns, $source)` clears confirmation answers and hints, starts a new epoch, reopens the target (lead-in `Messages::goingBack(...)`) and fires `ConversationListener::wentBack()`. **Later answers stay**; only `invalidates` dependents are cleared if the new value differs.
+`Contracts\ChangeDetector::detect($text, $currentStep, $state): ?string` is an optional, deterministic hook ("actually it's a Toyota", "go back") that returns the step to reopen; it needs no AI and `Flow::revisitable($state, $current)` lists valid targets. `FlowEngine::goBack($session, $state, $from, $target, $leadIns, $source)` clears confirmation answers and hints, starts a new epoch, reopens the target (lead-in `Messages::goingBack($display, $source)`; return `''` to drop it, e.g. for plain edits) and fires `ConversationListener::wentBack()`. **Later answers stay**; only `invalidates` dependents are cleared if the new value differs.
 
 ## Hand-off interrupt
 
@@ -436,7 +436,7 @@ At `maxTurns` the engine writes `Messages::turnLimitReached()` **once**, calls `
 
 ## Listener
 
-Extend `ConversationListener` (every method is a no-op) and override what you need: `answered`, `interpreted`, `wentBack`, `invalid`, `turnLimitReached`, `invariantViolated`, `submitted`, `completed`, `submissionFailed`.
+Extend `ConversationListener` (every method is a no-op) and override what you need: `answered`, `interpreted`, `corrected`, `wentBack`, `invalid`, `turnLimitReached`, `invariantViolated`, `submitted`, `completed`, `submissionFailed`.
 
 ## Wiring
 

@@ -20,12 +20,15 @@ The engine now covers everything a production lead-chat app needs, as generic fe
 - **Hand-off**: `Flow::interrupt()`, `HandoffPolicy`, `Handoff`.
 - **Deferred completion**: `Flow::deferCompletion()`, `DeferredCompletion`, `FlowEngine::completeSubmission()`, `TurnResult::submitting()`, `Flow::uiUsing()`.
 - **Turn limit** ends the conversation (`TurnResult::ended()`, `{type: 'ended'}` UI).
-- `ConversationListener` with no-op hooks.
+- `ConversationListener` with no-op hooks, including `corrected($session, $step, $old, $new)`, which fires (together with a transcript event `correction "step" (source: ai_correction)`) for every AI correction that was committed.
 - `FlowEngine` and `ChatEndpoint` take named optional arguments for all of the above; Laravel config keys `messages`, `interpreter`, `change_detector`, `handoff`, `interpretation_policy`, `listener`, `check_invariants`.
 - `ArraySession` keeps a message list and implements `StoresMessages` and `DeferredCompletion`; `ChatEndpoint` returns `messages` and `cursor`.
 - Widget renders the server's message stream (acknowledgements, side answers, errors), review sections, non-editable rows, consent/submitting and ended states.
 
 ### Changed
+- `invalidates`, `resetsFlow` and the automatic clearing of confirmation steps fire only when an **existing** answer changes to a different value, never on a step's first answer (same rule as `onChange`). A prefilled value is no longer wiped when the step that `invalidates` it is answered for the first time.
+- A correction/revisit interpretation (`intent: correction`, or a `revisit` / a failed correction that could not be applied) now goes back even when the current text also parses; the current answer is not committed.
+- `ui()` reports `{type: 'ended'}` as soon as `turnCount() >= maxTurns` (the message and listener call still happen once, on the next turn attempt); `ChatEndpoint` then reports status `ended`.
 - Prefill from a parse result is applied in flow order, only to unanswered applicable steps, and never overwrites an answer (v1 set it unconditionally).
 - Values from an interpreter are parsed by the step's own `parse` instead of being stored raw.
 - `Interpretation` is immutable and uses getters.
@@ -39,7 +42,7 @@ The engine now covers everything a production lead-chat app needs, as generic fe
 6. **Transcript and asks.** Invalid answers now record an ask (reason `invalid`); `ChatState::askLog()` entries have a `reason`. The `ArraySession` array format gained `messages`, `messageBase` and `submitting` (old data loads fine).
 7. **Custom `ChatSession` implementations** need no change. To use two-phase completion also implement `Contracts\DeferredCompletion`; to return messages from `ChatEndpoint` use `ArraySession`.
 8. **Widget.** Update `stepchat-widget.js` together with the PHP package. An older widget keeps working against a v2 server (it ignores `messages` and echoes locally), but it will not show acknowledgements, side answers or the `ended`/`submitting` states.
-9. **Messages.** Hard-coded English engine strings now come from `Messages`; override them to localise.
+9. **Messages.** Hard-coded English engine strings now come from `Messages`; override them to localise. `Messages::goingBack()` receives the source (`detector`, `ai`, `ai_correction`, `edit`) as a second argument; return `''` to show no lead-in (e.g. for plain edits). Custom `Messages` implementations must add the parameter.
 
 ## [1.0.1] - 2026-11-11
 

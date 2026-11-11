@@ -31,6 +31,17 @@ class ConversationListener
     {
     }
 
+    /**
+     * An AI correction was committed for an earlier answer (also written as a
+     * transcript event). Fired once per corrected step.
+     *
+     * @param mixed $old
+     * @param mixed $new
+     */
+    public function corrected(ChatSession $session, string $step, $old, $new): void
+    {
+    }
+
     public function invalid(ChatSession $session, string $step, string $error): void
     {
     }

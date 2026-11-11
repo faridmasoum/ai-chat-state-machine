@@ -79,7 +79,7 @@ final class FlowLifecycleTest extends TestCase
         $m = new EnglishMessages();
         $this->assertInstanceOf(Messages::class, $m);
         $this->assertSame('Updated: A, B.', $m->updated(['A', 'B']));
-        $this->assertSame("Sure, let's change that.", $m->goingBack(''));
+        $this->assertSame("Sure, let's change that.", $m->goingBack('', 'edit'));
         $this->assertSame('Try again', $m->submitLabel(new ChatState(), true));
         $this->assertSame('Submit', $m->submitLabel(new ChatState(), false));
     }
