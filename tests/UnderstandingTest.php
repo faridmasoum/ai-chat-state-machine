@@ -504,29 +504,150 @@ final class UnderstandingTest extends TestCase
         $this->assertContains('corrected:budget:"50">"80000"', $listener->events);
     }
 
-    public function test_a_deterministic_correction_runs_invalidates_on_change_and_clears_confirmations(): void
+    public function test_a_deterministic_correction_runs_on_change_hooks_and_clears_confirmations(): void
     {
         $changed = [];
         $flow = Flow::make()
-            ->add(StepDefinition::make('budget', 'Budget')->parse($this->budgetParse())->invalidates(['color'])
+            ->add(StepDefinition::make('budget', 'Budget')->parse($this->budgetParse())
                 ->onChange(static function (ChatState $s, $old, $new) use (&$changed) {
                     $changed[] = [$old, $new];
                 }))
-            ->add(Flows::text('color'))
             ->add(Flows::text('review')->confirmation())
             ->add(Flows::text('year'));
         $engine = new FlowEngine($flow, null, 200, null, null, $this->detector('sorry', 'budget'), null, null, null, true, true);
         $s = $this->start($engine);
-        foreach (['budget' => '50', 'color' => 'red', 'review' => 'ok'] as $k => $v) {
+        foreach (['budget' => '50', 'review' => 'ok'] as $k => $v) {
             $engine->handleTurn($s, new Turn($k, Turn::TEXT, $v));
         }
 
         $engine->handleTurn($s, new Turn('year', Turn::TEXT, 'sorry 80k'));
 
         $this->assertSame([['50', '80000']], $changed);
-        $this->assertFalse($s->chatState()->has('color'), 'invalidates cleared the dependent');
         $this->assertFalse($s->chatState()->has('review'), 'confirmation cleared');
-        $this->assertSame('color', $s->currentStep());
+        $this->assertSame('review', $s->currentStep());
+    }
+
+    // ------------------------------------------------ never silently clear other answers
+
+    private function objectiveFlow(): Flow
+    {
+        return Flow::make()
+            ->add(StepDefinition::make('objective', 'Objective')
+                ->parse(static function (Turn $t): StepResult {
+                    return stripos($t->text(), 'quote') !== false ? StepResult::ok('quote') : StepResult::ok(strtolower($t->text()));
+                })
+                ->invalidates(['make', 'model']))
+            ->add(Flows::text('make'))
+            ->add(Flows::text('model'))
+            ->add(Flows::text('year'));
+    }
+
+    private function objectiveEngine(?ClosureInterpreter &$ai = null, ?RecordingListener $listener = null): FlowEngine
+    {
+        $ai = new ClosureInterpreter(static function () {
+            return Interpretation::fail();
+        });
+
+        return new FlowEngine($this->objectiveFlow(), $ai, 200, null, null, $this->detector('i have', 'objective'), null, $listener, null, true, true);
+    }
+
+    public function test_a_deterministic_correction_is_skipped_when_it_would_clear_answered_steps(): void
+    {
+        $listener = new RecordingListener();
+        $engine = $this->objectiveEngine($ai, $listener);
+        $s = $this->start($engine);
+        foreach (['objective' => 'buy', 'make' => 'Audi', 'model' => 'A4'] as $k => $v) {
+            $engine->handleTurn($s, new Turn($k, Turn::TEXT, $v));
+        }
+
+        $engine->handleTurn($s, new Turn('year', Turn::TEXT, 'i have a written quote'));
+
+        $this->assertSame('buy', $s->chatState()->answer('objective'), 'not committed');
+        $this->assertSame('Audi', $s->chatState()->answer('make'), 'nothing cleared');
+        $this->assertSame('A4', $s->chatState()->answer('model'));
+        $this->assertSame('objective', $s->currentStep(), 'goes back and asks');
+        $this->assertSame('objective', $s->chatState()->editing());
+        $this->assertCount(1, $ai->calls, 'today\'s path: the interpreter is consulted first');
+        $this->assertNotContains('corrected:objective:"buy">"quote"', $listener->events);
+    }
+
+    public function test_a_correction_is_still_deterministic_when_the_invalidated_steps_have_no_answers(): void
+    {
+        $engine = $this->objectiveEngine($ai);
+        $s = $this->start($engine);
+        $engine->handleTurn($s, new Turn('objective', Turn::TEXT, 'buy'));
+        // "make" and "model" are not answered yet, so nothing would be cleared.
+        $st = $s->chatState();
+        $s->setCurrentStep('make');
+        $s->putChatState($st);
+
+        $engine->handleTurn($s, new Turn('make', Turn::TEXT, 'i have a written quote'));
+
+        $this->assertSame('quote', $s->chatState()->answer('objective'));
+        $this->assertSame([], $ai->calls);
+    }
+
+    public function test_a_step_that_resets_the_flow_is_never_corrected_deterministically(): void
+    {
+        $flow = Flow::make()
+            ->add(Flows::text('who')->resetsFlow())
+            ->add(Flows::text('name'));
+        $ai = new ClosureInterpreter(static function () {
+            return Interpretation::fail();
+        });
+        $engine = new FlowEngine($flow, $ai, 200, null, null, $this->detector('actually', 'who'), null, null, null, true, true);
+        $s = $this->start($engine);
+        $engine->handleTurn($s, new Turn('who', Turn::TEXT, 'buyer'));
+
+        $engine->handleTurn($s, new Turn('name', Turn::TEXT, 'actually partner'));
+
+        $this->assertSame('buyer', $s->chatState()->answer('who'));
+        $this->assertSame('who', $s->currentStep());
+        $this->assertCount(1, $ai->calls);
+    }
+
+    public function test_a_step_without_dependants_is_corrected_directly(): void
+    {
+        $ai = new ClosureInterpreter(static function () {
+            return Interpretation::fail();
+        });
+        $flow = Flow::make()
+            ->add(StepDefinition::make('budget', 'Budget')->parse($this->budgetParse()))
+            ->add(Flows::text('make'))
+            ->add(Flows::text('year'));
+        $engine = new FlowEngine($flow, $ai, 200, null, null, $this->detector('sorry', 'budget'), null, null, null, true, true);
+        $s = $this->start($engine);
+        foreach (['budget' => '50', 'make' => 'Audi'] as $k => $v) {
+            $engine->handleTurn($s, new Turn($k, Turn::TEXT, $v));
+        }
+
+        $engine->handleTurn($s, new Turn('year', Turn::TEXT, 'sorry, budget is 80k'));
+
+        $this->assertSame('80000', $s->chatState()->answer('budget'));
+        $this->assertSame('Audi', $s->chatState()->answer('make'));
+        $this->assertSame('year', $s->currentStep());
+        $this->assertSame([], $ai->calls, 'the interpreter was not called');
+    }
+
+    public function test_confirm_changes_always_takes_the_go_back_path(): void
+    {
+        $ai = new ClosureInterpreter(static function () {
+            return Interpretation::fail();
+        });
+        $flow = Flow::make()
+            ->add(StepDefinition::make('budget', 'Budget')->parse($this->budgetParse())->confirmChanges())
+            ->add(Flows::text('year'));
+        $engine = new FlowEngine($flow, $ai, 200, null, null, $this->detector('sorry', 'budget'), null, null, null, true, true);
+        $s = $this->start($engine);
+        $engine->handleTurn($s, new Turn('budget', Turn::TEXT, '50'));
+
+        $engine->handleTurn($s, new Turn('year', Turn::TEXT, 'sorry, budget is 80k'));
+
+        $this->assertSame('50', $s->chatState()->answer('budget'), 'answers kept until the user picks');
+        $this->assertSame('budget', $s->currentStep());
+        $this->assertCount(1, $ai->calls);
+        $this->assertTrue(StepDefinition::make('a', 'A')->confirmChanges()->confirmChanges);
+        $this->assertFalse(StepDefinition::make('a', 'A')->confirmChanges(false)->confirmChanges);
     }
 
     public function test_without_the_option_a_detected_change_still_goes_back(): void

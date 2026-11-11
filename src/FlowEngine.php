@@ -712,7 +712,9 @@ final class FlowEngine
             return false;
         }
         $step = $this->flow->step($target);
-        if (!$step || $step->sensitive) {
+        // Never silently clear other answers: a change that would (resetsFlow, or an answered
+        // step in `invalidates`) or that the step wants confirmed goes the go-back path instead.
+        if (!$step || $step->sensitive || $step->confirmChanges || $step->wouldClearOthers($state)) {
             return false;
         }
         $result = $step->stepParse(new Turn($target, Turn::TEXT, $text), ChatState::fromArray($state->toArray()), $this->messages->required());

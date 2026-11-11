@@ -3,6 +3,14 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.1] - 2026-11-11
+
+### Fixed
+- A deterministic correction (`deterministicCorrections`) no longer silently clears other answers. It is only applied when committing it would not clear anything: it is skipped when the target step has `resetsFlow`, or when any step in its `invalidates` list currently has an answer. It then falls back to the normal path (interpreter, else go back and ask), so the user re-picks the value and the old answers stay until then.
+
+### Added
+- `StepDefinition::confirmChanges(bool = true)`: a detected change to this step always takes the go-back path, never a deterministic correction. `StepDefinition::wouldClearOthers($state)` exposes the check.
+
 ## [2.1.0] - 2026-11-11
 
 Backward compatible: every default equals the 2.0.1 behaviour.
