@@ -73,6 +73,9 @@ final class FlowEngine
     /** @var InvariantChecker */
     private $invariants;
 
+    /** @var bool */
+    private $deterministicCorrections;
+
     /** @var list<array{0: string, 1: string}> lead-ins (text, kind) waiting for the next ask */
     private $leadIns = [];
 
@@ -89,7 +92,8 @@ final class FlowEngine
         ?HandoffPolicy $handoff = null,
         ?ConversationListener $listener = null,
         ?InterpretationPolicy $interpretationPolicy = null,
-        bool $checkInvariants = true
+        bool $checkInvariants = true,
+        bool $deterministicCorrections = false
     ) {
         if ($interpreter instanceof TurnInterpreter) {
             $interpreter = new LegacyInterpreterAdapter($interpreter);
@@ -108,6 +112,7 @@ final class FlowEngine
         $this->policy = $interpretationPolicy ?? new NeverInterpretPolicy();
         $this->checkInvariants = $checkInvariants;
         $this->invariants = new InvariantChecker();
+        $this->deterministicCorrections = $deterministicCorrections;
     }
 
     public function flow(): Flow
@@ -380,37 +385,26 @@ final class FlowEngine
 
         $this->echoTurn($session, $state, $turn, $step);
 
+        $meta = $step->interpretMode() === StepDefinition::INTERPRET_META;
         $mayAsk = $turn->is(Turn::TEXT) && $step->isInterpretable() && !$step->isSensitiveTurn($turn);
         $parsed = $step->stepParse($turn, $state, $this->messages->required());
 
-        // Deterministic change detection ("actually it's a Toyota", "go back").
-        $detected = null;
-        if ($mayAsk && $this->changeDetector) {
-            $target = $this->changeDetector->detect($turn->text(), $key, $this->stateForAi($state));
-            if ($target !== null && in_array($target, $this->flow->revisitable($state, $key), true)) {
-                $detected = $target;
-            }
+        // Deterministic change detection ("actually it's a Toyota", "go back"), then a
+        // deterministic correction (no AI round-trip) when the target step can parse the text.
+        $detected = $mayAsk ? $this->detectChange($state, $key, $turn) : null;
+        if ($detected !== null && $this->deterministicCorrection($session, $state, $key, $detected, $turn->text())) {
+            $this->ask($session, $state, $this->nextStep($state), AskReason::NEXT);
+
+            return TurnResult::continue();
         }
 
         // Interpretation (optional).
-        $interp = null;
-        $aiFailed = false;
-        if ($mayAsk && $this->interpreter && (
-            (!$parsed->ok && $parsed->unrecognised)
-            || $detected !== null
-            || $this->policy->shouldInterpret($session, $state, $key, $turn, $parsed)
-        )) {
-            $candidate = $this->interpreter->interpret($session, $this->stateForAi($state), $key, $turn->text());
-            if ($candidate->failed()) {
-                $aiFailed = true;
-            } else {
-                $interp = $candidate;
-            }
-        }
+        [$interp, $aiFailed] = $this->consult($session, $state, $key, $step, $turn, $parsed, $detected, $mayAsk);
 
-        // a) the AI's value for the current step: only when the deterministic parse failed.
-        if ($interp && !$parsed->ok && $detected === null && isset($interp->answers()[$key])) {
-            $ai = $step->stepParseRaw($interp->answers()[$key], $state);
+        // a) the AI's value for the current step: only when the deterministic parse failed
+        //    (never on a meta-only step: its value is always the user's own text).
+        if (!$meta && $interp && !$parsed->ok && $detected === null && isset($interp->answers()[$key])) {
+            $ai = $step->stepParseRaw($interp->answers()[$key], $state, $this->messages->required());
             if ($ai->ok) {
                 $parsed = $ai;
             } elseif ($ai->hint !== []) {
@@ -434,7 +428,7 @@ final class FlowEngine
                 $this->clearConfirmations($state);
                 $state->bumpEpoch();
                 $this->leadIn($this->messages->updated($labels), 'ack');
-                if (!$parsed->ok || $detected !== null || !$step->stepApplies($state)) {
+                if ($meta || !$parsed->ok || $detected !== null || !$step->stepApplies($state)) {
                     $this->ask($session, $state, $this->nextStep($state), AskReason::NEXT);
 
                     return TurnResult::continue();
@@ -448,18 +442,7 @@ final class FlowEngine
         $wantsRevisit = $interp !== null && !$applied
             && ($interp->intent() === Interpretation::CORRECTION || $interp->revisit() !== null);
         if ($detected !== null || !$parsed->ok || $wantsRevisit) {
-            $target = $detected;
-            $source = 'detector';
-            if ($target === null && $interp) {
-                $revisit = $interp->revisit();
-                if ($revisit !== null && in_array($revisit, $this->flow->revisitable($state, $key), true)) {
-                    $target = $revisit;
-                    $source = 'ai';
-                } elseif ($failedCorrections !== []) {
-                    $target = $failedCorrections[0];
-                    $source = 'ai_correction';
-                }
-            }
+            [$target, $source] = $this->revisitTarget($state, $key, $detected, $interp, $failedCorrections);
             if ($target !== null) {
                 $this->addReply($interp);
 
@@ -467,11 +450,11 @@ final class FlowEngine
             }
         }
 
-        // e) still invalid.
-        if (!$parsed->ok) {
+        // e) still invalid, or (meta-only step) a side question: the text is not committed.
+        $question = $interp ? $interp->question() : null;
+        if (!$parsed->ok || ($meta && $question !== null)) {
             $state->setHint($key, $parsed->hint);
             $this->addReply($interp);
-            $question = $interp ? $interp->question() : null;
             if ($question !== null) {
                 $interrupt = $this->sideQuestion($session, $state, $key, $question);
                 if ($interrupt !== null) {
@@ -484,24 +467,17 @@ final class FlowEngine
                 return TurnResult::continue();
             }
 
-            $error = $aiFailed ? $this->messages->fallback() : (string) $parsed->error;
-            $state->recordInvalidAttempt($key);
-            $this->listener->invalid($session, $key, $error);
-            $this->leadIn($error, 'error');
-            $this->ask($session, $state, $key, AskReason::INVALID);
-
-            return TurnResult::invalid($error);
+            return $this->rejected($session, $state, $key, $step, $turn, $parsed, $interp, $aiFailed);
         }
 
         // f) valid.
         $this->addReply($interp);
         $this->commit($session, $state, $step, $parsed->value);
-        $this->leadInText($step->acknowledgeText($parsed->value, $state, $turn->is(Turn::SKIP)), 'ack');
+        $this->leadInText($parsed->skipAck ?? $step->acknowledgeText($parsed->value, $state, $turn->is(Turn::SKIP) || $parsed->skipped), 'ack');
 
         $this->applyPrefill($session, $state, $key, $parsed->prefill, $interp ? $interp->answers() : []);
 
         $next = $this->nextStep($state);
-        $question = $interp ? $interp->question() : null;
         if ($question !== null) {
             $interrupt = $this->sideQuestion($session, $state, $key, $question);
             if ($interrupt !== null) {
@@ -597,40 +573,109 @@ final class FlowEngine
         }
         $this->echoTurn($session, $state, $turn, $step);
 
-        $result = $step->stepParse($turn, $state, $this->messages->required());
-        if (!$result->ok) {
-            $state->recordInvalidAttempt($key);
-            $state->setHint($key, $result->hint);
-            $this->listener->invalid($session, $key, (string) $result->error);
-            $this->leadIn((string) $result->error, 'error');
-            $this->ask($session, $state, $key, AskReason::INVALID);
+        // Free text on an interrupt goes through the same escalation as a normal step.
+        $meta = $step->interpretMode() === StepDefinition::INTERPRET_META;
+        $mayAsk = $turn->is(Turn::TEXT) && $step->isInterpretable() && !$step->isSensitiveTurn($turn);
+        $parsed = $step->stepParse($turn, $state, $this->messages->required());
 
-            return TurnResult::invalid((string) $result->error);
+        $detected = $mayAsk ? $this->detectChange($state, $key, $turn) : null;
+        if ($detected !== null && $this->deterministicCorrection($session, $state, $key, $detected, $turn->text())) {
+            $state->endInterrupt();
+            $this->ask($session, $state, $this->nextStep($state), AskReason::NEXT);
+
+            return TurnResult::continue();
         }
 
-        $skipped = $turn->is(Turn::SKIP);
+        [$interp, $aiFailed] = $this->consult($session, $state, $key, $step, $turn, $parsed, $detected, $mayAsk);
+
+        if (!$meta && $interp && !$parsed->ok && $detected === null && isset($interp->answers()[$key])) {
+            $ai = $step->stepParseRaw($interp->answers()[$key], $state, $this->messages->required());
+            if ($ai->ok) {
+                $parsed = $ai;
+            } elseif ($ai->hint !== []) {
+                $parsed->hint = $ai->hint;
+            }
+        }
+        if ($interp) {
+            $this->listener->interpreted($session, $state, $interp);
+        }
+
+        // A correction ends the interrupt (the flow continues from the next step) ...
+        $failedCorrections = [];
+        $applied = false;
+        if ($interp && $interp->corrections() !== []) {
+            [$labels, $failedCorrections] = $this->applyCorrections($session, $state, $key, $interp->corrections());
+            if ($labels !== []) {
+                $applied = true;
+                $this->addReply($interp);
+                $this->clearConfirmations($state);
+                $state->bumpEpoch();
+                $this->leadIn($this->messages->updated($labels), 'ack');
+                if ($meta || !$parsed->ok || $detected !== null) {
+                    $state->endInterrupt();
+                    $this->ask($session, $state, $this->nextStep($state), AskReason::NEXT);
+
+                    return TurnResult::continue();
+                }
+            }
+        }
+
+        // ... and so does a revisit: the interrupt ends, then the flow goes back.
+        $wantsRevisit = $interp !== null && !$applied
+            && ($interp->intent() === Interpretation::CORRECTION || $interp->revisit() !== null);
+        if ($detected !== null || !$parsed->ok || $wantsRevisit) {
+            [$target, $source] = $this->revisitTarget($state, $key, $detected, $interp, $failedCorrections);
+            if ($target !== null) {
+                $this->addReply($interp);
+                $state->endInterrupt();
+
+                return $this->goBack($session, $state, $key, $target, [], $source);
+            }
+        }
+
+        // A side question is answered (never handed off again) and the interrupt question asked again.
+        $question = $interp ? $interp->question() : null;
+        $answer = $question !== null && $question['answerable'] && $question['answer'] !== null && $question['answer'] !== ''
+            ? $question['answer']
+            : null;
+        if (!$parsed->ok || ($meta && $question !== null)) {
+            $state->setHint($key, $parsed->hint);
+            $this->addReply($interp);
+            if ($question !== null) {
+                $this->leadInText($answer, 'ack');
+                $this->ask($session, $state, $key, AskReason::REASK);
+
+                return TurnResult::continue();
+            }
+
+            return $this->rejected($session, $state, $key, $step, $turn, $parsed, $interp, $aiFailed);
+        }
+
+        $this->addReply($interp);
+        $skipped = $turn->is(Turn::SKIP) || $parsed->skipped;
         if ($step->storesAnswer) {
-            $this->commit($session, $state, $step, $result->value);
+            $this->commit($session, $state, $step, $parsed->value);
         } else {
             $state->clearHint($key);
             $state->clearInvalidAttempts($key);
             if ($step->afterApply) {
-                ($step->afterApply)($state, $result->value);
+                ($step->afterApply)($state, $parsed->value);
             }
-            $this->listener->answered($session, $state, $key, $result->value);
+            $this->listener->answered($session, $state, $key, $parsed->value);
         }
 
-        $ack = $step->acknowledgeText($result->value, $state, $skipped);
+        $ack = $parsed->skipAck ?? $step->acknowledgeText($parsed->value, $state, $skipped);
         if ($ack === null) {
             if ($skipped) {
                 $ack = $this->messages->handoffSkipped();
-            } elseif (is_string($result->value) && $result->value !== '') {
-                $ack = $this->messages->handoffWithContact($result->value);
+            } elseif (is_string($parsed->value) && $parsed->value !== '') {
+                $ack = $this->messages->handoffWithContact($parsed->value);
             } else {
                 $ack = $this->messages->handoffSaved();
             }
         }
         $this->leadIn($ack, 'ack');
+        $this->leadInText($answer, 'ack');
 
         $resume = (string) $state->resumeStep();
         $state->endInterrupt();
@@ -642,6 +687,142 @@ final class FlowEngine
     }
 
     // ----------------------------------------------------------- helpers
+
+    /**
+     * The step the ChangeDetector wants to reopen, if it is a valid target.
+     */
+    private function detectChange(ChatState $state, string $key, Turn $turn): ?string
+    {
+        if (!$this->changeDetector) {
+            return null;
+        }
+        $target = $this->changeDetector->detect($turn->text(), $key, $this->stateForAi($state));
+
+        return $target !== null && in_array($target, $this->flow->revisitable($state, $key), true) ? $target : null;
+    }
+
+    /**
+     * Opt-in speed path: parse the user's text with the detected TARGET step (on a
+     * copy of the state). If it yields a valid, different value, commit it as a
+     * correction without consulting the interpreter. Returns true when it did.
+     */
+    private function deterministicCorrection(ChatSession $session, ChatState $state, string $current, string $target, string $text): bool
+    {
+        if (!$this->deterministicCorrections) {
+            return false;
+        }
+        $step = $this->flow->step($target);
+        if (!$step || $step->sensitive) {
+            return false;
+        }
+        $result = $step->stepParse(new Turn($target, Turn::TEXT, $text), ChatState::fromArray($state->toArray()), $this->messages->required());
+        if (!$result->ok || $result->skipped || ($step->validate)($result->value, $state) !== null) {
+            return false;
+        }
+        if (ChatState::same($state->answer($target), $result->value)) {
+            return false;
+        }
+
+        $this->commitCorrection($session, $state, $current, $step, $result->value, 'detector');
+        $this->clearConfirmations($state);
+        $state->bumpEpoch();
+        $this->leadIn($this->messages->updated([$step->label]), 'ack');
+
+        return true;
+    }
+
+    /**
+     * Consult the interpreter when the escalation rules say so. Returns [interpretation, aiFailed].
+     * On a meta-only step an unrecognised parse does not trigger it (the policy or a detected change does).
+     *
+     * @return array{0: Interpretation|null, 1: bool}
+     */
+    private function consult(ChatSession $session, ChatState $state, string $key, StepDefinition $step, Turn $turn, StepResult $parsed, ?string $detected, bool $mayAsk): array
+    {
+        if (!$mayAsk || !$this->interpreter) {
+            return [null, false];
+        }
+        $unrecognised = !$parsed->ok && $parsed->unrecognised && $step->interpretMode() === StepDefinition::INTERPRET_FULL;
+        if (!$unrecognised && $detected === null && !$this->policy->shouldInterpret($session, $state, $key, $turn, $parsed)) {
+            return [null, false];
+        }
+
+        $start = microtime(true);
+        $candidate = $this->interpreter->interpret($session, $this->stateForAi($state), $key, $turn->text());
+        $this->listener->interpretationTimed($session, $key, (int) round((microtime(true) - $start) * 1000));
+
+        return $candidate->failed() ? [null, true] : [$candidate, false];
+    }
+
+    /**
+     * Where a revisit should go: the detector's target, the interpretation's revisit, or the
+     * first correction that could not be applied.
+     *
+     * @param list<string> $failedCorrections
+     * @return array{0: string|null, 1: string} target and source (detector|ai|ai_correction)
+     */
+    private function revisitTarget(ChatState $state, string $key, ?string $detected, ?Interpretation $interp, array $failedCorrections): array
+    {
+        if ($detected !== null) {
+            return [$detected, 'detector'];
+        }
+        if ($interp) {
+            $revisit = $interp->revisit();
+            if ($revisit !== null && in_array($revisit, $this->flow->revisitable($state, $key), true)) {
+                return [$revisit, 'ai'];
+            }
+            if ($failedCorrections !== []) {
+                return [$failedCorrections[0], 'ai_correction'];
+            }
+        }
+
+        return [null, 'detector'];
+    }
+
+    /**
+     * The answer was rejected and nothing else could be done: record the attempt (unless it was a
+     * retry), tell the listener and ask the step again with the error.
+     */
+    private function rejected(ChatSession $session, ChatState $state, string $key, StepDefinition $step, Turn $turn, StepResult $parsed, ?Interpretation $interp, bool $aiFailed): TurnResult
+    {
+        $error = $aiFailed ? $this->messages->fallback() : (string) $parsed->error;
+        if ($parsed->countsAttempt) {
+            $state->recordInvalidAttempt($key);
+        }
+        $this->listener->invalid($session, $key, $error);
+
+        if ($turn->is(Turn::TEXT) && !$step->isSensitiveTurn($turn)) {
+            $reason = null;
+            if ($step->interpretMode() === StepDefinition::INTERPRET_NONE) {
+                $reason = 'not_interpretable';
+            } elseif ($aiFailed) {
+                $reason = 'ai_failed';
+            } elseif ($interp !== null) {
+                $reason = 'ai_unhelpful';
+            }
+            if ($reason !== null) {
+                $this->listener->unclear($session, $key, $turn->text(), $reason);
+            }
+        }
+
+        $this->leadIn($error, 'error');
+        $this->ask($session, $state, $key, AskReason::INVALID);
+
+        return TurnResult::invalid($error);
+    }
+
+    /**
+     * Commit a correction of an earlier answer and make it observable (transcript event + listener).
+     *
+     * @param mixed $value
+     */
+    private function commitCorrection(ChatSession $session, ChatState $state, string $current, StepDefinition $step, $value, string $source): void
+    {
+        $old = $state->answer($step->key);
+        $this->commit($session, $state, $step, $value);
+        $this->transcript->event($session, $current, sprintf('correction "%s" (source: %s)', $step->key, $source));
+        $this->listener->corrected($session, $step->key, $old, $value);
+    }
 
     /**
      * Stores a validated value, clears what it invalidates and runs the
@@ -731,11 +912,8 @@ final class FlowEngine
             if (ChatState::same($state->answer($key), $result->value)) {
                 continue;
             }
-            $old = $state->answer($key);
-            $this->commit($session, $state, $step, $result->value);
+            $this->commitCorrection($session, $state, $current, $step, $result->value, 'ai_correction');
             $labels[] = $step->label;
-            $this->transcript->event($session, $current, sprintf('correction "%s" (source: ai_correction)', $key));
-            $this->listener->corrected($session, $key, $old, $result->value);
         }
 
         return [$labels, $failed];

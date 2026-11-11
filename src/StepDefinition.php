@@ -10,6 +10,15 @@ use Closure;
  */
 final class StepDefinition
 {
+    /** The interpreter may supply the answer (default). */
+    public const INTERPRET_FULL = 'full';
+
+    /** The value is always the user's own text; the interpreter is only used for meta (corrections, revisit, side questions). */
+    public const INTERPRET_META = 'meta';
+
+    /** The interpreter is never consulted. */
+    public const INTERPRET_NONE = 'none';
+
     /** @var string */
     public $key;
 
@@ -73,8 +82,11 @@ final class StepDefinition
     /** @var Closure(Turn): bool|null raw input that is NOT secret on a sensitive step */
     public $sensitiveUnless;
 
-    /** @var bool */
+    /** @var bool false only in INTERPRET_NONE mode */
     public $interpretable = true;
+
+    /** @var string */
+    public $interpretMode = self::INTERPRET_FULL;
 
     /** @var string|null */
     public $requiredMessage;
@@ -279,10 +291,26 @@ final class StepDefinition
         return $this;
     }
 
-    /** When false the interpreter and change detector are never consulted on this step. */
-    public function interpretable(bool $interpretable = true): self
+    /**
+     * How the interpreter may be used on this step: true / INTERPRET_FULL (default), INTERPRET_META
+     * (the value is always the user's own text; the interpreter can still produce corrections,
+     * a revisit or a side question, and the text is not committed when it does), or
+     * false / INTERPRET_NONE (never consulted). The change detector runs unless the mode is NONE.
+     *
+     * @param bool|string $mode
+     */
+    public function interpretable($mode = true): self
     {
-        $this->interpretable = $interpretable;
+        if ($mode === true) {
+            $mode = self::INTERPRET_FULL;
+        } elseif ($mode === false) {
+            $mode = self::INTERPRET_NONE;
+        }
+        if (!in_array($mode, [self::INTERPRET_FULL, self::INTERPRET_META, self::INTERPRET_NONE], true)) {
+            throw new \InvalidArgumentException(sprintf('Unknown interpret mode "%s".', is_scalar($mode) ? (string) $mode : gettype($mode)));
+        }
+        $this->interpretMode = $mode;
+        $this->interpretable = $mode !== self::INTERPRET_NONE;
 
         return $this;
     }
@@ -374,7 +402,12 @@ final class StepDefinition
 
     public function isInterpretable(): bool
     {
-        return $this->interpretable;
+        return $this->interpretMode !== self::INTERPRET_NONE;
+    }
+
+    public function interpretMode(): string
+    {
+        return $this->interpretMode;
     }
 
     // ------------------------------------------------------------- runtime
@@ -408,12 +441,34 @@ final class StepDefinition
     public function stepParse(Turn $turn, ChatState $state, ?string $requiredDefault = null): StepResult
     {
         if ($turn->is(Turn::SKIP)) {
-            return $this->isOptional($state)
-                ? StepResult::ok($this->skipValue)
-                : StepResult::invalid($this->requiredMessage ?? $requiredDefault ?? 'This step is required.');
+            if (!$this->isOptional($state)) {
+                return StepResult::invalid($this->requiredMessage ?? $requiredDefault ?? 'This step is required.');
+            }
+            $skip = StepResult::skip();
+            $skip->value = $this->skipValue;
+
+            return $skip;
         }
 
-        return ($this->parse)($turn, $state);
+        return $this->resolveSkip(($this->parse)($turn, $state), $state, $requiredDefault);
+    }
+
+    /**
+     * A parse that returned StepResult::skip() is a skip: on an optional step it
+     * stores the skip value, on a required one it is invalid.
+     */
+    private function resolveSkip(StepResult $result, ChatState $state, ?string $requiredDefault): StepResult
+    {
+        if (!$result->ok || !$result->skipped) {
+            return $result;
+        }
+        if (!$this->isOptional($state)) {
+            return StepResult::invalid($this->requiredMessage ?? $requiredDefault ?? 'This step is required.');
+        }
+        $skip = StepResult::skip($result->skipAck);
+        $skip->value = $this->skipValue;
+
+        return $skip;
     }
 
     /**
@@ -423,7 +478,7 @@ final class StepDefinition
      *
      * @param mixed $raw
      */
-    public function stepParseRaw($raw, ChatState $state): StepResult
+    public function stepParseRaw($raw, ChatState $state, ?string $requiredDefault = null): StepResult
     {
         if (is_array($raw)) {
             $turn = new Turn($this->key, Turn::LIST, array_values(array_filter($raw, 'is_string')));
@@ -434,8 +489,8 @@ final class StepDefinition
         } else {
             return StepResult::invalid($this->requiredMessage ?? 'This step is required.');
         }
-        $result = ($this->parse)($turn, $state);
-        if ($result->ok) {
+        $result = $this->resolveSkip(($this->parse)($turn, $state), $state, $requiredDefault);
+        if ($result->ok && !$result->skipped) {
             $error = ($this->validate)($result->value, $state);
             if ($error !== null) {
                 return StepResult::invalid($error, $result->hint);
@@ -456,7 +511,9 @@ final class StepDefinition
     public function stepPrefill($raw, ChatState $state, bool $fromAi = false): StepResult
     {
         if ($this->prefillUsing) {
-            return ($this->prefillUsing)($raw, $state);
+            $result = ($this->prefillUsing)($raw, $state);
+
+            return $result->ok && $result->skipped ? StepResult::invalid('A prefill cannot skip a step.') : $result;
         }
         if ($fromAi) {
             return $this->stepParseRaw($raw, $state);
