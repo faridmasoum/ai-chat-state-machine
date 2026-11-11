@@ -3,6 +3,11 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.0.1] - 2026-11-11
+
+### Fixed
+- An interpretation's `reply()` is now shown when the answer is still invalid or the user asked a side question (it was only shown when the answer was accepted, corrected or sent back). One message now reads: reply, then the side answer or the error, then the question. The reply is never shown twice.
+
 ## [2.0.0] - 2026-11-11
 
 The engine now covers everything a production lead-chat app needs, as generic features. A flow that uses none of the new features behaves like v1, apart from the changes listed under UPGRADE.

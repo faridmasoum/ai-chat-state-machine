@@ -1,12 +1,12 @@
 /*!
- * StepChat - browser widget v2.0.0
+ * StepChat - browser widget v2.0.1
  * Zero dependencies, no build step. MIT licensed.
  * https://github.com/faridmasoum/stepchat
  */
 (function (global) {
   'use strict';
 
-  var VERSION = '2.0.0';
+  var VERSION = '2.0.1';
 
   // ------------------------------------------------------------------ i18n
   var EN = {
