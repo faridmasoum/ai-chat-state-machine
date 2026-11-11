@@ -34,6 +34,9 @@ return [
     'listener' => null,
     'check_invariants' => true,
 
+    // Parse "sorry, budget is 80k" with the detected target step itself and correct it without calling the interpreter.
+    'deterministic_corrections' => false,
+
     /*
     |--------------------------------------------------------------------------
     | Session storage

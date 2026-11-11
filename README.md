@@ -320,7 +320,7 @@ Every option below is optional and chainable on `StepDefinition` (or on any `Ste
 | `confirmation()` | The answer only confirms earlier ones (review, consent). It is cleared automatically whenever another answer changes, an edit starts or a go-back happens, so it is asked again. |
 | `revalidate(false)` | The invariant checker keeps the stored answer even if `validate` fails later. |
 | `sensitive()` / `sensitiveUnless(fn(Turn): bool)` | Secrets: never written to the transcript (shows `Messages::secretEntered()`), never passed to the interpreter or change detector. `sensitiveUnless` marks an escape input (e.g. a "continue as buyer" button) as not secret. Stored secrets are also hidden from the state copy given to an interpreter. |
-| `interpretable(false)` | The interpreter and change detector are never consulted on this step (verbatim free text). |
+| `interpretable($mode)` | `INTERPRET_FULL` / `true` (default): the interpreter may supply the answer. `INTERPRET_META`: the value is always the user's own text; the interpreter is only used for meta (corrections, a revisit, side questions). `INTERPRET_NONE` / `false`: the interpreter and change detector are never consulted (verbatim free text). See [Understanding every message](#understanding-every-message). |
 | `requiredMessage(string)` | Error for a skip on a required step (default: `Messages::required()`). |
 | `echo(fn(Turn, ChatState): string)` | How the user's turn appears in the transcript. Default: choice → option label, list → labels joined with `, `, skip → `Messages::skipped()`, text as typed. |
 | `acknowledge(fn($value, ChatState, bool $skipped): ?string)` | Text shown after the answer is accepted, before the next question. |
@@ -337,6 +337,8 @@ StepDefinition::make('features', 'Features')
         ? StepResult::ok($t->list())
         : StepResult::invalid('Pick at least two.', ['selected' => $t->list()]));
 ```
+
+`StepResult::skip(?string $ack = null)` lets a *parse* decide that the user declined ("no thanks"): on an optional step it is handled exactly like a `SKIP` turn (the skip value is stored, `afterApply` runs with it, `acknowledge` gets `skipped = true`, `$ack` replaces the acknowledgement text); on a required step it is invalid with `Messages::required()`. `StepResult::retry($error, $hint = [])` is like `invalid()` but is not counted as an attempt (`ChatState::invalidAttempts()` stays untouched): for input that was not even an attempt, such as a sentence typed into a code field.
 
 ## Transcript and messages
 
@@ -436,7 +438,7 @@ At `maxTurns` the engine writes `Messages::turnLimitReached()` **once**, calls `
 
 ## Listener
 
-Extend `ConversationListener` (every method is a no-op) and override what you need: `answered`, `interpreted`, `corrected`, `wentBack`, `invalid`, `turnLimitReached`, `invariantViolated`, `submitted`, `completed`, `submissionFailed`.
+Extend `ConversationListener` (every method is a no-op) and override what you need: `answered`, `interpreted`, `interpretationTimed`, `corrected`, `wentBack`, `invalid`, `unclear`, `turnLimitReached`, `invariantViolated`, `submitted`, `completed`, `submissionFailed`.
 
 ## Wiring
 
@@ -452,6 +454,7 @@ $engine = new FlowEngine(
     interpretationPolicy: $policy,
     maxTurns: 200,
     checkInvariants: true,
+    deterministicCorrections: false,       // opt in to AI-free corrections, see "Understanding every message"
 );
 ```
 
@@ -514,6 +517,58 @@ final class LlmInterpreter implements ConversationInterpreter
 6. Valid: the answer is committed, later steps are prefilled from the parse result **and** `answers` (see [Prefill rules](#prefill-rules)), and a side question asked next to a valid answer is answered as a lead-in to the next question.
 
 The interpreter and detector receive a copy of the state without sensitive answers. A **v1 `TurnInterpreter` still works**: it is wrapped by `Support\LegacyInterpreterAdapter` (value → `answers[current]`, prefill → `answers`). Without an interpreter the package makes zero network calls and costs nothing to run.
+
+## Understanding every message
+
+Goal: every typed message is understood or explicitly clarified (never silently misread), while the AI is only consulted when needed so turns stay fast. A `TEXT` turn escalates in this order, and every stage is optional:
+
+1. **Deterministic parse.** The step's own `parse` runs first. A valid answer wins; the interpreter is not called.
+2. **ChangeDetector.** If you configured one and the step is not `INTERPRET_NONE`, it can say "this text is about an earlier step" ("sorry, budget is 80k").
+3. **Deterministic correction** (opt-in, `deterministicCorrections: true`). The text is parsed with the detected *target* step on a copy of the state. If it parses, passes `validate` and differs from the stored answer, it is committed as a correction (`invalidates`, `onChange`, `afterApply`, confirmations cleared, new epoch, `Messages::updated()`, `ConversationListener::corrected()`, a transcript event with source `detector`) and the chat continues from `nextStep()`, **without calling the interpreter**.
+4. **Interpreter.** Consulted when the parse is `unrecognised` (full-mode steps), when a change was detected but could not be applied deterministically, or when your `InterpretationPolicy` says so. A failed or unhelpful call falls through to the next stage.
+5. **Clarify.** The step is asked again with the error (`Messages::fallback()` if the AI call failed), a side question is answered, or the flow goes back. `ConversationListener::unclear()` tells you when a message ended up here.
+
+### Escalating with an `InterpretationPolicy`
+
+By default only `unrecognised()` parses reach the interpreter; a plain `invalid()` is cheap and final. Use the policy to escalate invalid results that look like a sentence rather than a mistyped value:
+
+```php
+final class SentencePolicy implements InterpretationPolicy
+{
+    public function shouldInterpret(ChatSession $s, ChatState $st, string $step, Turn $turn, StepResult $parsed): bool
+    {
+        return !$parsed->ok && str_word_count($turn->text()) >= 4;   // "it was made in 2020 I think"
+    }
+}
+$engine = new FlowEngine($flow, interpreter: $ai, interpretationPolicy: new SentencePolicy(), deterministicCorrections: true);
+```
+
+### Verbatim steps: meta-only interpretation
+
+For a free-text step such as "which features do you want?", use `->interpretable(StepDefinition::INTERPRET_META)`. The step's value is always the user's own text; `answers[thisStep]` is ignored, and the AI is never used to fill or correct a meta step. The engine never calls the interpreter on it by default (the policy decides), but when it was consulted (or the detector fired) its meta output is honoured: applied corrections, a revisit, a detected change or a side question mean the current text is **not** committed (the flow goes back, the question is answered, or the step is re-asked). Otherwise the text is stored verbatim.
+
+### Interrupt steps
+
+Typed text on an interrupt step goes through the same escalation (detector, deterministic correction, interpreter, respecting the step's interpret mode and `sensitive` flag). A side question is answered and the interrupt question asked again (an interrupt is never handed off again). A correction or revisit ends the interrupt and then continues or goes back. A parse can return `StepResult::skip()` for "no thanks": it is acknowledged as skipped and the flow resumes.
+
+### Knowing what was not understood
+
+```php
+final class Metrics extends ConversationListener
+{
+    public function unclear(ChatSession $s, string $step, string $text, string $reason): void
+    {
+        // $reason: ai_failed | ai_unhelpful | not_interpretable
+    }
+
+    public function interpretationTimed(ChatSession $s, string $step, int $ms): void
+    {
+        // latency of every interpreter call (also failed ones)
+    }
+}
+```
+
+`unclear()` fires when a `TEXT` turn ends invalid after the interpreter failed (`ai_failed`) or returned nothing usable (`ai_unhelpful`), or when the step is `INTERPRET_NONE` and the text was rejected (`not_interpretable`). It is never fired for sensitive steps, and not when the interpreter was simply not consulted: widen the policy for those. With Laravel set `'deterministic_corrections' => true` in `config/stepchat.php`.
 
 ## Laravel
 

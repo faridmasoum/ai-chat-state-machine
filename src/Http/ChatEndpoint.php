@@ -67,6 +67,9 @@ final class ChatEndpoint
     /** @var bool */
     private $checkInvariants;
 
+    /** @var bool */
+    private $deterministicCorrections;
+
     /**
      * @param \FaridM\StepChat\Contracts\ConversationInterpreter|\FaridM\StepChat\Contracts\TurnInterpreter|null $interpreter
      * @param Messages|Closure(string|null): Messages|null $messages a Messages object, or a factory receiving the widget locale
@@ -82,7 +85,8 @@ final class ChatEndpoint
         ?HandoffPolicy $handoff = null,
         ?ConversationListener $listener = null,
         ?InterpretationPolicy $interpretationPolicy = null,
-        bool $checkInvariants = true
+        bool $checkInvariants = true,
+        bool $deterministicCorrections = false
     ) {
         $this->flows = $flows;
         $this->store = $store;
@@ -95,6 +99,7 @@ final class ChatEndpoint
         $this->listener = $listener;
         $this->policy = $interpretationPolicy;
         $this->checkInvariants = $checkInvariants;
+        $this->deterministicCorrections = $deterministicCorrections;
     }
 
     /**
@@ -122,7 +127,8 @@ final class ChatEndpoint
             $this->handoff,
             $this->listener,
             $this->policy,
-            $this->checkInvariants
+            $this->checkInvariants,
+            $this->deterministicCorrections
         );
         $defaultMessages = $messages === null || get_class($messages) === EnglishMessages::class;
         $cursor = max(0, (int) ($input['cursor'] ?? 0));

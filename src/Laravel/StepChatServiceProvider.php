@@ -72,7 +72,8 @@ class StepChatServiceProvider extends ServiceProvider
                 $resolve('handoff'),
                 $resolve('listener'),
                 $resolve('interpretation_policy'),
-                (bool) $cfg->get('stepchat.check_invariants', true)
+                (bool) $cfg->get('stepchat.check_invariants', true),
+                (bool) $cfg->get('stepchat.deterministic_corrections', false)
             );
         });
 

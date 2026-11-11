@@ -46,6 +46,26 @@ class ConversationListener
     {
     }
 
+    /**
+     * A TEXT turn was not understood: it ended invalid after the interpreter failed
+     * (`ai_failed`) or returned nothing usable (`ai_unhelpful`), or the step is not
+     * interpretable (`not_interpretable`) and the text was rejected. Never fired for
+     * sensitive steps. Not fired when the interpreter was simply not consulted
+     * (escalate those with an InterpretationPolicy).
+     *
+     * @param string $reason ai_failed|ai_unhelpful|not_interpretable
+     */
+    public function unclear(ChatSession $session, string $step, string $text, string $reason): void
+    {
+    }
+
+    /**
+     * How long one interpreter call took (also fired when it failed).
+     */
+    public function interpretationTimed(ChatSession $session, string $step, int $ms): void
+    {
+    }
+
     public function turnLimitReached(ChatSession $session): void
     {
     }
