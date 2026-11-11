@@ -6,7 +6,7 @@
 (function (global) {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '2.0.0';
 
   // ------------------------------------------------------------------ i18n
   var EN = {
