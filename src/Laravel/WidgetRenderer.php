@@ -1,6 +1,6 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Laravel;
+namespace FaridM\StepChat\Laravel;
 
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Support\HtmlString;
@@ -10,7 +10,7 @@ use Illuminate\Support\HtmlString;
  */
 class WidgetRenderer
 {
-    public const VERSION = '1.0.0';
+    public const VERSION = '1.0.1';
 
     /** @var Repository */
     private $config;
@@ -21,11 +21,11 @@ class WidgetRenderer
     }
 
     /**
-     * @param array<string, mixed> $options overrides for config('ai-chat-state-machine.widget.*')
+     * @param array<string, mixed> $options overrides for config('stepchat.widget.*')
      */
     public function render(?string $flow = null, array $options = []): HtmlString
     {
-        $cfg = (array) $this->config->get('ai-chat-state-machine.widget', []);
+        $cfg = (array) $this->config->get('stepchat.widget', []);
         if (empty($cfg['enabled'])) {
             return new HtmlString('');
         }
@@ -71,10 +71,10 @@ class WidgetRenderer
         if (!empty($o['asset_url'])) {
             return (string) $o['asset_url'];
         }
-        if (function_exists('public_path') && is_file(public_path('vendor/ai-chat-state-machine/ai-chat-widget.js'))) {
-            return asset('vendor/ai-chat-state-machine/ai-chat-widget.js');
+        if (function_exists('public_path') && is_file(public_path('vendor/stepchat/stepchat-widget.js'))) {
+            return asset('vendor/stepchat/stepchat-widget.js');
         }
 
-        return 'https://cdn.jsdelivr.net/gh/faridmasoum/stepchat@v' . self::VERSION . '/resources/dist/ai-chat-widget.js';
+        return 'https://cdn.jsdelivr.net/gh/faridmasoum/stepchat@v' . self::VERSION . '/resources/dist/stepchat-widget.js';
     }
 }

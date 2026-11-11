@@ -1,17 +1,17 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Tests\Laravel;
+namespace FaridM\StepChat\Tests\Laravel;
 
 // Laravel integration tests need orchestra/testbench (installed on PHP 8.2+ in CI).
 if (!class_exists(\Orchestra\Testbench\TestCase::class)) {
     return;
 }
 
-use FaridM\AiChatStateMachine\Contracts\FlowFactory;
-use FaridM\AiChatStateMachine\Flow;
-use FaridM\AiChatStateMachine\Laravel\AiChatStateMachineServiceProvider;
-use FaridM\AiChatStateMachine\Laravel\FlowCompleted;
-use FaridM\AiChatStateMachine\Steps;
+use FaridM\StepChat\Contracts\FlowFactory;
+use FaridM\StepChat\Flow;
+use FaridM\StepChat\Laravel\FlowCompleted;
+use FaridM\StepChat\Laravel\StepChatServiceProvider;
+use FaridM\StepChat\Steps;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Event;
 use Orchestra\Testbench\TestCase;
@@ -30,16 +30,16 @@ final class WidgetIntegrationTest extends TestCase
 {
     protected function getPackageProviders($app): array
     {
-        return [AiChatStateMachineServiceProvider::class];
+        return [StepChatServiceProvider::class];
     }
 
     protected function defineEnvironment($app): void
     {
         $app['config']->set('app.key', 'base64:' . base64_encode(str_repeat('a', 32)));
         $app['config']->set('cache.default', 'array');
-        $app['config']->set('ai-chat-state-machine.widget.enabled', true);
-        $app['config']->set('ai-chat-state-machine.widget.flows', ['lead' => TestLeadFlow::class]);
-        $app['config']->set('ai-chat-state-machine.widget.middleware', []);
+        $app['config']->set('stepchat.widget.enabled', true);
+        $app['config']->set('stepchat.widget.flows', ['lead' => TestLeadFlow::class]);
+        $app['config']->set('stepchat.widget.middleware', []);
     }
 
     public function test_full_conversation_over_http_dispatches_event(): void
@@ -71,7 +71,7 @@ final class WidgetIntegrationTest extends TestCase
 
     public function test_blade_directive_renders_one_line_script_tag(): void
     {
-        $html = Blade::render("@aiChatWidget('lead', ['lang' => 'ar', 'color' => '#0ea5e9'])");
+        $html = Blade::render("@stepChatWidget('lead', ['lang' => 'ar', 'color' => '#0ea5e9'])");
         $this->assertStringContainsString('<script', $html);
         $this->assertStringContainsString('data-flow="lead"', $html);
         $this->assertStringContainsString('data-lang="ar"', $html);
@@ -82,13 +82,13 @@ final class WidgetIntegrationTest extends TestCase
 
     public function test_component_renders(): void
     {
-        $html = Blade::render('<x-ai-chat-widget flow="lead" lang="he" />');
+        $html = Blade::render('<x-stepchat-widget flow="lead" lang="he" />');
         $this->assertStringContainsString('data-lang="he"', $html);
     }
 
     public function test_attributes_are_escaped(): void
     {
-        $html = Blade::render("@aiChatWidget('lead', ['title' => '\"><script>x</script>'])");
+        $html = Blade::render("@stepChatWidget('lead', ['title' => '\"><script>x</script>'])");
         $this->assertStringNotContainsString('"><script>x', $html);
     }
 }
@@ -97,12 +97,12 @@ final class DisabledByDefaultTest extends TestCase
 {
     protected function getPackageProviders($app): array
     {
-        return [AiChatStateMachineServiceProvider::class];
+        return [StepChatServiceProvider::class];
     }
 
     public function test_no_route_and_no_output_when_disabled(): void
     {
         $this->postJson('/chat-flow/lead', ['action' => 'start'])->assertStatus(404);
-        $this->assertSame('', trim(Blade::render("@aiChatWidget('lead')")));
+        $this->assertSame('', trim(Blade::render("@stepChatWidget('lead')")));
     }
 }

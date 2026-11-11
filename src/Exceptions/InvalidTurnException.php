@@ -1,6 +1,6 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Exceptions;
+namespace FaridM\StepChat\Exceptions;
 
 use RuntimeException;
 

@@ -1,6 +1,6 @@
 <?php
 
-namespace FaridM\AiChatStateMachine;
+namespace FaridM\StepChat;
 
 /**
  * One-line presets for the most common step types. Each preset sets both the

@@ -2,9 +2,9 @@
 
 namespace App\Chat;
 
-use FaridM\AiChatStateMachine\Contracts\FlowFactory;
-use FaridM\AiChatStateMachine\Flow;
-use FaridM\AiChatStateMachine\Steps;
+use FaridM\StepChat\Contracts\FlowFactory;
+use FaridM\StepChat\Flow;
+use FaridM\StepChat\Steps;
 
 class LeadFlow implements FlowFactory
 {
@@ -17,6 +17,6 @@ class LeadFlow implements FlowFactory
             ->add(Steps::email('email', __('What is your email?')))
             ->add(Steps::choice('topic', __('What can we help with?'), ['sales' => 'Sales', 'support' => 'Support']))
             ->add(Steps::text('message', __('Anything else?'), ['multiline' => true])->optional());
-        // Save the answers by listening for FaridM\AiChatStateMachine\Laravel\FlowCompleted.
+        // Save the answers by listening for FaridM\StepChat\Laravel\FlowCompleted.
     }
 }

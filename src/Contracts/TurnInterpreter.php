@@ -1,9 +1,9 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Contracts;
+namespace FaridM\StepChat\Contracts;
 
-use FaridM\AiChatStateMachine\ChatState;
-use FaridM\AiChatStateMachine\Interpretation;
+use FaridM\StepChat\ChatState;
+use FaridM\StepChat\Interpretation;
 
 /**
  * Optional free-text fallback. The engine always decides which step is asked

@@ -1,6 +1,6 @@
 <?php
 
-namespace FaridM\AiChatStateMachine;
+namespace FaridM\StepChat;
 
 /**
  * Result of a TurnInterpreter call: either a value for the step that was

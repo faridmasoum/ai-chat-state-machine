@@ -1,8 +1,8 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Support;
+namespace FaridM\StepChat\Support;
 
-use FaridM\AiChatStateMachine\Contracts\SessionStore;
+use FaridM\StepChat\Contracts\SessionStore;
 
 /**
  * Stores conversations in PHP's native $_SESSION. Zero setup for plain-PHP
@@ -10,7 +10,7 @@ use FaridM\AiChatStateMachine\Contracts\SessionStore;
  */
 final class NativeSessionStore implements SessionStore
 {
-    private const KEY = '_ai_chat_state_machine';
+    private const KEY = '_stepchat';
 
     public function load(string $id): ?ArraySession
     {

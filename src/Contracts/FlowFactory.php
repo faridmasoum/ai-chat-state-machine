@@ -1,8 +1,8 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Contracts;
+namespace FaridM\StepChat\Contracts;
 
-use FaridM\AiChatStateMachine\Flow;
+use FaridM\StepChat\Flow;
 
 /**
  * Implement this on a class that builds one of your flows, so it can be

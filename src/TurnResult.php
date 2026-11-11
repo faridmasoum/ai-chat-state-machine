@@ -1,6 +1,6 @@
 <?php
 
-namespace FaridM\AiChatStateMachine;
+namespace FaridM\StepChat;
 
 /**
  * Outcome of FlowEngine::handleTurn(): what the caller should do next.

@@ -1,6 +1,6 @@
 <?php
 
-namespace FaridM\AiChatStateMachine;
+namespace FaridM\StepChat;
 
 /**
  * An ordered collection of StepDefinition. The order declared here is the

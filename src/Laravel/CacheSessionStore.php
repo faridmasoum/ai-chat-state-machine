@@ -1,9 +1,9 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Laravel;
+namespace FaridM\StepChat\Laravel;
 
-use FaridM\AiChatStateMachine\Contracts\SessionStore;
-use FaridM\AiChatStateMachine\Support\ArraySession;
+use FaridM\StepChat\Contracts\SessionStore;
+use FaridM\StepChat\Support\ArraySession;
 use Illuminate\Contracts\Cache\Repository;
 
 /**
@@ -37,6 +37,6 @@ class CacheSessionStore implements SessionStore
 
     private function key(string $id): string
     {
-        return 'ai-chat-state-machine:' . $id;
+        return 'stepchat:' . $id;
     }
 }

@@ -1,19 +1,19 @@
 <?php
 
-namespace FaridM\AiChatStateMachine\Tests;
+namespace FaridM\StepChat\Tests;
 
-use FaridM\AiChatStateMachine\Flow;
-use FaridM\AiChatStateMachine\FlowEngine;
-use FaridM\AiChatStateMachine\Steps;
-use FaridM\AiChatStateMachine\Support\ArraySession;
-use FaridM\AiChatStateMachine\Turn;
+use FaridM\StepChat\Flow;
+use FaridM\StepChat\FlowEngine;
+use FaridM\StepChat\Steps;
+use FaridM\StepChat\Support\ArraySession;
+use FaridM\StepChat\Turn;
 use PHPUnit\Framework\TestCase;
 
 final class StepsTest extends TestCase
 {
     private function parse($step, string $type, $value)
     {
-        return $step->stepParse(new Turn($step->key, $type, $value), new \FaridM\AiChatStateMachine\ChatState());
+        return $step->stepParse(new Turn($step->key, $type, $value), new \FaridM\StepChat\ChatState());
     }
 
     public function test_email_preset(): void
@@ -21,7 +21,7 @@ final class StepsTest extends TestCase
         $step = Steps::email('email', 'Email');
         $this->assertTrue($this->parse($step, Turn::TEXT, 'a@b.co')->ok);
         $this->assertFalse($this->parse($step, Turn::TEXT, 'nope')->ok);
-        $this->assertSame('email', $step->stepUi(new \FaridM\AiChatStateMachine\ChatState())['inputType']);
+        $this->assertSame('email', $step->stepUi(new \FaridM\StepChat\ChatState())['inputType']);
     }
 
     public function test_phone_and_number_presets(): void
@@ -37,7 +37,7 @@ final class StepsTest extends TestCase
         $step = Steps::choice('plan', 'Plan', ['free' => 'Free tier', 'pro' => 'Pro']);
         $this->assertTrue($this->parse($step, Turn::CHOICE, 'pro')->ok);
         $this->assertFalse($this->parse($step, Turn::CHOICE, 'gold')->ok);
-        $this->assertSame('Free tier', ($step->display)('free', new \FaridM\AiChatStateMachine\ChatState()));
+        $this->assertSame('Free tier', ($step->display)('free', new \FaridM\StepChat\ChatState()));
     }
 
     public function test_multi_choice_and_confirm(): void
