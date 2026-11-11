@@ -185,7 +185,7 @@ final class FlowEngine
             $result = $this->handleAnswer($session, $state, $turn);
         }
 
-        if ($this->checkInvariants && !$result->isCompleted() && !$state->ended()) {
+        if ($this->checkInvariants && !$result->isCompleted()) {
             $this->enforceInvariants($session, $state, $askMark);
         }
 
