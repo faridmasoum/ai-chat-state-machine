@@ -1,12 +1,12 @@
 /*!
- * StepChat - browser widget v1.0.0
+ * StepChat - browser widget v2.0.0
  * Zero dependencies, no build step. MIT licensed.
  * https://github.com/faridmasoum/stepchat
  */
 (function (global) {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '2.0.0';
 
   // ------------------------------------------------------------------ i18n
   var EN = {
@@ -384,6 +384,7 @@
   };
 
   Widget.prototype.destroy = function () {
+    if (this.pollTimer) { clearTimeout(this.pollTimer); this.pollTimer = null; }
     if (this.host.parentNode) { this.host.parentNode.removeChild(this.host); }
   };
 
@@ -393,7 +394,7 @@
     var meta = document.querySelector('meta[name="csrf-token"]');
     var token = (meta && meta.content) || this.o.csrf;
     if (token) { headers['X-CSRF-TOKEN'] = token; }
-    body.flow = this.flow; body.locale = this.lang; body.session = this.session;
+    body.flow = this.flow; body.locale = this.lang; body.session = this.session; body.cursor = this.cursor || 0;
     return fetch(this.endpoint, { method: 'POST', credentials: 'same-origin', headers: headers, body: JSON.stringify(body) })
       .then(function (r) {
         return r.json().then(function (j) { return { http: r.status, body: j }; }, function () { return { http: r.status, body: {} }; });
@@ -419,6 +420,7 @@
 
   Widget.prototype.boot = function (action) {
     var self = this;
+    this.cursor = 0;   // a (re)boot replays the whole conversation from the server
     this.setBusy(true);
     this.post({ action: action }).then(function (res) {
       self.setBusy(false);
@@ -431,7 +433,7 @@
     var self = this;
     if (this.busy || !this.ui) { return; }
     var step = this.ui.step;
-    if (echo != null) { this.say('user', echo); }
+    if (echo != null && !this.streaming) { this.say('user', echo); }
     this.setBusy(true);
     this.post({ action: 'turn', turn: { step: step, type: type, value: value } }).then(function (res) {
       self.setBusy(false);
@@ -459,22 +461,42 @@
     this.summary = b.summary || [];
     this.progress(b.progress);
 
+    var stream = Array.isArray(b.messages);
+    this.streaming = stream;
+    this.custom = b.defaultMessages === false;
     if (res.http === 409) { rebuild = true; }
-    if (rebuild) {
-      this.log.innerHTML = '';
-      for (var i = 0; i < this.summary.length && b.ui.type !== 'done'; i++) {
-        if (b.ui.type !== 'review' && this.summary[i].step === b.ui.step) { continue; }
-        this.say('bot', this.summary[i].label);
-        this.say('user', this.summary[i].value === '' ? '\u2014' : this.summary[i].value);
-      }
-      if (this.completed) { this.log.innerHTML = ''; }
+
+    if (stream) {
+      // v2 server: the conversation itself (bot lead-ins, errors, echoes) comes from the server.
+      if (rebuild && res.http !== 409) { this.log.innerHTML = ''; }
+      this.renderMessages(b);
+      this.cursor = b.cursor || 0;
       if (res.http === 409 && b.error) { this.say('err', b.error); }
+    } else {
+      if (rebuild) {
+        this.log.innerHTML = '';
+        for (var i = 0; i < this.summary.length && b.ui.type !== 'done'; i++) {
+          if (b.ui.type !== 'review' && this.summary[i].step === b.ui.step) { continue; }
+          this.say('bot', this.summary[i].label);
+          this.say('user', this.summary[i].value === '' ? '\u2014' : this.summary[i].value);
+        }
+        if (this.completed) { this.log.innerHTML = ''; }
+        if (res.http === 409 && b.error) { this.say('err', b.error); }
+      }
+
+      if (b.status === 'invalid') {
+        this.say('err', b.error || this.t('error'));
+      } else if (rebuild || !wasUi || wasUi.step !== b.ui.step || wasUi.type !== b.ui.type || b.status === 'completed') {
+        this.present(b.ui);
+      }
     }
 
-    if (b.status === 'invalid') {
-      this.say('err', b.error || this.t('error'));
-    } else if (rebuild || !wasUi || wasUi.step !== b.ui.step || wasUi.type !== b.ui.type || b.status === 'completed') {
-      this.present(b.ui);
+    if (this.pollTimer) { clearTimeout(this.pollTimer); this.pollTimer = null; }
+    if (b.status === 'submitting' || b.ui.submitting) {
+      var poller = this;
+      this.pollTimer = setTimeout(function () {
+        poller.post({ action: 'state' }).then(function (r) { poller.handle(r, false); }, function () {});
+      }, 1500);
     }
 
     this.renderComposer();
@@ -496,26 +518,61 @@
   };
 
   Widget.prototype.present = function (ui) {
-    var self = this;
     if (ui.type === 'review') {
       this.say('bot', ui.message || this.t('review'));
-      var card = el('div', 'card');
-      (ui.items || []).forEach(function (it) {
+      this.card(ui);
+    } else if (ui.type === 'done') {
+      this.say('bot', ui.message || this.t('done'));
+    } else if (ui.type === 'ended') {
+      this.say('err', ui.text || this.t('error'));
+    } else if (ui.message) {
+      this.say('bot', ui.message);
+    }
+  };
+
+  // Messages written by the server since the last cursor.
+  Widget.prototype.renderMessages = function (b) {
+    var self = this, msgs = b.messages || [], lastReview = -1, i;
+    for (i = 0; i < msgs.length; i++) { if (msgs[i].kind === 'review') { lastReview = i; } }
+    msgs.forEach(function (m, idx) {
+      if (m.role === 'user') { self.say('user', m.text === '' ? '\u2014' : m.text); return; }
+      var text = m.text;
+      // Default (English) engine wording is replaced by the widget's own translation.
+      if (b.defaultMessages !== false && m.kind === 'review') { text = self.t('review'); }
+      if (b.defaultMessages !== false && m.kind === 'done') { text = self.t('done'); }
+      self.say(m.kind === 'error' || m.kind === 'ended' ? 'err' : 'bot', text);
+      if (m.kind === 'review' && idx === lastReview && b.ui.type === 'review') { self.card(b.ui); }
+    });
+  };
+
+  // Review summary: items, or sections [{title, items}]; rows with editable === false have no Edit button.
+  Widget.prototype.card = function (ui) {
+    var self = this, card = el('div', 'card');
+    var rows = function (items) {
+      (items || []).forEach(function (it) {
         var row = el('div', 'row');
         var txt = el('div');
         txt.appendChild(el('div', 'k', it.label));
         txt.appendChild(el('div', 'v', it.value === '' || it.value == null ? '\u2014' : it.value));
-        var edit = el('button', 'link', self.t('edit')); edit.type = 'button';
-        edit.addEventListener('click', function () { self.sendTurn('edit', it.step, self.t('edit') + ': ' + it.label); });
-        row.appendChild(txt); row.appendChild(edit); card.appendChild(row);
+        row.appendChild(txt);
+        if (it.editable !== false && it.step) {
+          var edit = el('button', 'link', self.t('edit')); edit.type = 'button';
+          edit.addEventListener('click', function () { self.sendTurn('edit', it.step, self.t('edit') + ': ' + it.label); });
+          row.appendChild(edit);
+        }
+        card.appendChild(row);
       });
-      this.log.appendChild(card);
-      this.scroll();
-    } else if (ui.type === 'done') {
-      this.say('bot', ui.message || this.t('done'));
-    } else if (ui.message) {
-      this.say('bot', ui.message);
+    };
+    if (ui.sections) {
+      ui.sections.forEach(function (sec) {
+        if (sec.title) { card.appendChild(el('div', 'k', sec.title)); }
+        rows(sec.items);
+      });
+    } else {
+      rows(ui.items);
     }
+    this.log.appendChild(card);
+    this.scroll();
   };
 
   Widget.prototype.say = function (role, text) {
@@ -550,16 +607,26 @@
     if (!ui) { return; }
     var type = ui.type;
 
-    if (type === 'done') {
+    if (ui.submitting) {
+      c.appendChild(el('div', 'hint', this.t('typing')));
+      return;
+    }
+
+    if (type === 'ended' && ui.text) { c.appendChild(el('div', 'hint', ui.text)); }
+    if (type === 'done' || type === 'ended') {
       var again = el('button', 'btn ghost', this.t('restart')); again.type = 'button';
       again.addEventListener('click', function () { self.restart(); });
       c.appendChild(again);
       return;
     }
 
-    if (type === 'review') {
-      var sub = el('button', 'btn', this.t('submit')); sub.type = 'button';
-      sub.addEventListener('click', function () { self.sendTurn('submit', null, self.t('submit')); });
+    if (type === 'review' || type === 'consent') {
+      var asStep = type === 'review' && ui.step !== 'done';   // a review used as a normal (confirmation) step
+      var label = this.custom && (asStep ? ui.confirmLabel : ui.submitLabel) || this.t(asStep ? 'continue' : 'submit');
+      var sub = el('button', 'btn', label); sub.type = 'button';
+      sub.addEventListener('click', function () {
+        if (asStep) { self.sendTurn('choice', ui.confirmValue || 'confirm', label); } else { self.sendTurn('submit', true, label); }
+      });
       c.appendChild(sub);
       this.focusComposer();
       return;

@@ -52,11 +52,27 @@ class StepChatServiceProvider extends ServiceProvider
         });
 
         $this->app->singleton(ChatEndpoint::class, static function (Application $app): ChatEndpoint {
+            $cfg = $app['config'];
+            $resolve = static function (string $key) use ($app, $cfg) {
+                $class = $cfg->get('stepchat.' . $key);
+
+                return is_string($class) && $class !== '' ? $app->make($class) : null;
+            };
+
+            $messagesClass = $cfg->get('stepchat.messages');
+
             return new ChatEndpoint(
                 $app->make(FlowRegistry::class),
                 $app->make(SessionStore::class),
+                $resolve('interpreter'),
+                (int) $cfg->get('stepchat.max_turns', 200),
                 null,
-                (int) $app['config']->get('stepchat.max_turns', 200)
+                is_string($messagesClass) && $messagesClass !== '' ? $app->make($messagesClass) : null,
+                $resolve('change_detector'),
+                $resolve('handoff'),
+                $resolve('listener'),
+                $resolve('interpretation_policy'),
+                (bool) $cfg->get('stepchat.check_invariants', true)
             );
         });
 

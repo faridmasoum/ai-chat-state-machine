@@ -2,23 +2,39 @@
 
 namespace FaridM\StepChat;
 
+use FaridM\StepChat\Contracts\ChangeDetector;
 use FaridM\StepChat\Contracts\ChatSession;
+use FaridM\StepChat\Contracts\ConversationInterpreter;
+use FaridM\StepChat\Contracts\DeferredCompletion;
+use FaridM\StepChat\Contracts\HandoffPolicy;
+use FaridM\StepChat\Contracts\InterpretationPolicy;
+use FaridM\StepChat\Contracts\Messages;
+use FaridM\StepChat\Contracts\Transcript;
 use FaridM\StepChat\Contracts\TurnInterpreter;
+use FaridM\StepChat\Engine\DefaultEcho;
+use FaridM\StepChat\Engine\InvariantChecker;
 use FaridM\StepChat\Exceptions\InvalidTurnException;
 use FaridM\StepChat\Exceptions\StepMismatchException;
+use FaridM\StepChat\Support\DefaultHandoffPolicy;
+use FaridM\StepChat\Support\EnglishMessages;
+use FaridM\StepChat\Support\LegacyInterpreterAdapter;
+use FaridM\StepChat\Support\NeverInterpretPolicy;
+use FaridM\StepChat\Support\NullTranscript;
+use InvalidArgumentException;
+use LogicException;
 
 /**
  * Deterministic, server-controlled conversation flow.
  *
  * The engine (never the AI) decides which step comes next and validates
  * every answer against the step's own rules. A step is asked once, in
- * order; it is asked again only after an invalid answer, an edit, or an
- * interrupt (see ChatState::startInterrupt()).
+ * order; it is asked again only after an invalid answer, an edit, a
+ * go-back or an interrupt.
  *
- * A TurnInterpreter is entirely optional. When given, it only gets a turn
- * at the input the deterministic `parse` closure could not classify, and
- * its answer is only trusted to fill gaps — it never overrides a
- * successful deterministic parse.
+ * An interpreter is entirely optional. When given, it is consulted only on
+ * free-text turns, and every value it suggests is run through the target
+ * step's own parse before anything is stored: a successful deterministic
+ * parse always wins and AI output is never stored raw.
  */
 final class FlowEngine
 {
@@ -27,17 +43,71 @@ final class FlowEngine
     /** @var Flow */
     private $flow;
 
-    /** @var TurnInterpreter|null */
+    /** @var ConversationInterpreter|null */
     private $interpreter;
 
     /** @var int */
     private $maxTurns;
 
-    public function __construct(Flow $flow, ?TurnInterpreter $interpreter = null, int $maxTurns = 200)
-    {
+    /** @var Transcript */
+    private $transcript;
+
+    /** @var Messages */
+    private $messages;
+
+    /** @var ChangeDetector|null */
+    private $changeDetector;
+
+    /** @var HandoffPolicy */
+    private $handoff;
+
+    /** @var ConversationListener */
+    private $listener;
+
+    /** @var InterpretationPolicy */
+    private $policy;
+
+    /** @var bool */
+    private $checkInvariants;
+
+    /** @var InvariantChecker */
+    private $invariants;
+
+    /** @var list<array{0: string, 1: string}> lead-ins (text, kind) waiting for the next ask */
+    private $leadIns = [];
+
+    /**
+     * @param ConversationInterpreter|TurnInterpreter|null $interpreter a v1 TurnInterpreter is wrapped automatically
+     */
+    public function __construct(
+        Flow $flow,
+        $interpreter = null,
+        int $maxTurns = 200,
+        ?Transcript $transcript = null,
+        ?Messages $messages = null,
+        ?ChangeDetector $changeDetector = null,
+        ?HandoffPolicy $handoff = null,
+        ?ConversationListener $listener = null,
+        ?InterpretationPolicy $interpretationPolicy = null,
+        bool $checkInvariants = true
+    ) {
+        if ($interpreter instanceof TurnInterpreter) {
+            $interpreter = new LegacyInterpreterAdapter($interpreter);
+        } elseif ($interpreter !== null && !$interpreter instanceof ConversationInterpreter) {
+            throw new InvalidArgumentException('The interpreter must implement ConversationInterpreter or TurnInterpreter.');
+        }
+
         $this->flow = $flow;
         $this->interpreter = $interpreter;
         $this->maxTurns = $maxTurns;
+        $this->transcript = $transcript ?? new NullTranscript();
+        $this->messages = $messages ?? new EnglishMessages();
+        $this->changeDetector = $changeDetector;
+        $this->handoff = $handoff ?? new DefaultHandoffPolicy($this->messages);
+        $this->listener = $listener ?? new ConversationListener();
+        $this->policy = $interpretationPolicy ?? new NeverInterpretPolicy();
+        $this->checkInvariants = $checkInvariants;
+        $this->invariants = new InvariantChecker();
     }
 
     public function flow(): Flow
@@ -51,15 +121,23 @@ final class FlowEngine
     public function start(ChatSession $session): void
     {
         $state = new ChatState();
-        $session->setCurrentStep($this->nextStep($state));
-        $state->recordAsk($session->currentStep());
+        $this->leadIns = [];
+        $first = $this->nextStep($state);
+        $session->setCurrentStep($first);
+
+        $greeting = $this->flow->greetingText($state);
+        if ($greeting !== '') {
+            $this->transcript->assistant($session, $first, $greeting, 'info');
+        }
+
+        $this->ask($session, $state, $first, AskReason::NEXT);
         $session->putChatState($state);
     }
 
     /**
      * Apply one turn. Throws StepMismatchException if the turn targets a
      * step other than the session's current one (stale client, replay),
-     * and InvalidTurnException if the current step key is not in the flow.
+     * and InvalidTurnException if the turn is not valid here.
      */
     public function handleTurn(ChatSession $session, Turn $turn): TurnResult
     {
@@ -75,21 +153,40 @@ final class FlowEngine
             ));
         }
 
-        if ($session->turnCount() >= $this->maxTurns) {
-            return TurnResult::invalid('This conversation has reached its turn limit.');
+        if ($session instanceof DeferredCompletion && $session->isSubmitting()) {
+            return TurnResult::submitting();
+        }
+
+        $state = $session->chatState();
+        $this->leadIns = [];
+
+        if ($state->ended() || $session->turnCount() >= $this->maxTurns) {
+            if (!$state->ended()) {
+                $state->markEnded();
+                $this->transcript->assistant($session, $turn->step, $this->messages->turnLimitReached(), 'ended');
+                $this->transcript->event($session, $turn->step, 'turn limit reached');
+                $this->listener->turnLimitReached($session);
+                $session->putChatState($state);
+            }
+
+            return TurnResult::ended();
         }
 
         $session->incrementTurnCount();
-        $state = $session->chatState();
+        $askMark = $state->askTotal();
 
         if ($state->isInterrupted()) {
             $result = $this->handleInterruptAnswer($session, $state, $turn);
         } elseif ($turn->is(Turn::EDIT)) {
             $result = $this->handleEdit($session, $state, $turn);
         } elseif ($turn->is(Turn::SUBMIT)) {
-            $result = $this->handleSubmit($session, $state);
+            $result = $this->handleSubmit($session, $state, $turn);
         } else {
             $result = $this->handleAnswer($session, $state, $turn);
+        }
+
+        if ($this->checkInvariants && !$result->isCompleted()) {
+            $this->enforceInvariants($session, $state, $askMark);
         }
 
         $session->putChatState($state);
@@ -125,44 +222,58 @@ final class FlowEngine
      */
     public function ui(ChatSession $session): array
     {
-        $state = $session->chatState();
-        $key = $session->currentStep();
-
-        if ($session->isCompleted()) {
-            return ['type' => 'done', 'step' => self::DONE];
-        }
-
-        if ($key === self::DONE) {
-            return $this->reviewUi($state);
-        }
-
-        $step = $this->flow->step($key);
-        if (!$step) {
-            return ['type' => 'done', 'step' => self::DONE];
-        }
-
-        return $step->stepUi($state) + [
-            'step' => $key,
-            'message' => $step->label,
-            'optional' => $step->isOptional($state),
-        ];
+        return $this->uiFor($session, $session->chatState());
     }
 
     /**
-     * Every applicable step answered: show a summary the user can edit or submit.
+     * Summary of the answers so far: {type: 'review', items|sections, confirmLabel}.
+     * Items are {step, label, value, editable}. When any applicable step has
+     * a section(), grouped as sections [{title, items}] in flow order.
      *
      * @return array<string, mixed>
      */
-    private function reviewUi(ChatState $state): array
+    public function review(ChatState $state): array
     {
         $items = [];
+        $sectioned = false;
         foreach ($this->flow->steps() as $key => $step) {
-            if ($step->stepApplies($state) && $state->has($key)) {
-                $items[] = ['step' => $key, 'label' => $step->label, 'value' => $step->stepDisplay($state)];
+            if (!$step->stepApplies($state)) {
+                continue;
             }
+            if ($step->section !== null) {
+                $sectioned = true;
+            }
+            if ($step->confirmation || !$state->has($key)) {
+                continue;
+            }
+            $items[] = [
+                'step' => $key,
+                'label' => $step->label,
+                'value' => $step->stepDisplay($state),
+                'editable' => $step->isEditable(),
+                'section' => $step->section,
+            ];
         }
 
-        return ['type' => 'review', 'step' => self::DONE, 'items' => $items];
+        $review = ['type' => 'review', 'confirmLabel' => $this->messages->reviewConfirmLabel()];
+        if ($sectioned) {
+            $sections = [];
+            foreach ($items as $item) {
+                $title = (string) $item['section'];
+                unset($item['section']);
+                $sections[$title]['title'] = $title;
+                $sections[$title]['items'][] = $item;
+            }
+            $review['sections'] = array_values($sections);
+        } else {
+            $review['items'] = array_map(static function (array $item): array {
+                unset($item['section']);
+
+                return $item;
+            }, $items);
+        }
+
+        return $this->flow->applyReview($review, $state);
     }
 
     /**
@@ -183,6 +294,80 @@ final class FlowEngine
         ];
     }
 
+    /**
+     * Reopen an earlier step. Later answers stay; only `invalidates`
+     * dependents are cleared if the new value differs.
+     *
+     * @param list<string> $leadIns extra lead-in texts shown before the question
+     * @param string $source detector|ai|ai_correction|edit
+     */
+    public function goBack(ChatSession $session, ChatState $state, string $from, string $target, array $leadIns = [], string $source = 'detector'): TurnResult
+    {
+        $step = $this->flow->step($target);
+        if (!$step) {
+            throw new InvalidTurnException(sprintf('Cannot go back to unknown step "%s".', $target));
+        }
+
+        foreach ($leadIns as $text) {
+            $this->leadIn($text, 'ack');
+        }
+        $display = $state->has($target) ? $step->stepDisplay($state) : '';
+
+        $this->clearConfirmations($state);
+        $state->clearHints();
+        $state->bumpEpoch();
+        $state->setEditing($target);
+        $next = $this->nextStep($state);
+
+        $this->leadIn($this->messages->goingBack($display, $source), 'info');
+        $this->transcript->event($session, $from, sprintf('go back from "%s" to "%s" (source: %s)', $from, $target, $source));
+        $this->listener->wentBack($session, $from, $target, $source);
+        $this->ask($session, $state, $next, $source === 'edit' ? AskReason::EDIT : AskReason::GOBACK);
+
+        return TurnResult::continue();
+    }
+
+    /**
+     * Finish a deferred (two-phase) submission once the app has sent the
+     * result. On success the flow completes; on failure the consent step is
+     * asked again and offers a retry.
+     */
+    public function completeSubmission(ChatSession $session, bool $ok, ?string $error = null): TurnResult
+    {
+        if ($session->isCompleted()) {
+            return TurnResult::completed();
+        }
+        $state = $session->chatState();
+        $this->leadIns = [];
+        $submitKey = $this->flow->submitStepKey();
+
+        if ($ok) {
+            $step = $submitKey !== null ? $this->flow->step($submitKey) : null;
+            if ($step) {
+                $this->commit($session, $state, $step, true);
+            }
+            $state->setEditing(null);
+            $state->setSubmitFailed(false);
+            $this->finish($session, $state);
+            $session->putChatState($state);
+
+            return TurnResult::completed();
+        }
+
+        if ($session instanceof DeferredCompletion) {
+            $session->markSubmitFailed();
+        }
+        $state->setSubmitFailed(true);
+        $this->transcript->event($session, $session->currentStep(), 'submission failed' . ($error !== null ? ': ' . $error : ''));
+        $this->listener->submissionFailed($session, (string) $error);
+        $message = $this->messages->submissionFailed();
+        $this->leadIn($message, 'error');
+        $this->ask($session, $state, $submitKey ?? self::DONE, AskReason::REASK);
+        $session->putChatState($state);
+
+        return TurnResult::invalid($message);
+    }
+
     // ------------------------------------------------------------- turns
 
     private function handleAnswer(ChatSession $session, ChatState $state, Turn $turn): TurnResult
@@ -193,86 +378,286 @@ final class FlowEngine
             throw new InvalidTurnException(sprintf('Unknown step "%s".', $key));
         }
 
-        $result = $step->stepParse($turn, $state);
+        $this->echoTurn($session, $state, $turn, $step);
 
-        if (!$result->ok && $result->unrecognised && $this->interpreter && $turn->is(Turn::TEXT)) {
-            $interpretation = $this->interpreter->interpret($state, $key, $turn->text());
-            if (!$interpretation->failed) {
-                $result = StepResult::ok($interpretation->value, $interpretation->prefill);
+        $mayAsk = $turn->is(Turn::TEXT) && $step->isInterpretable() && !$step->isSensitiveTurn($turn);
+        $parsed = $step->stepParse($turn, $state, $this->messages->required());
+
+        // Deterministic change detection ("actually it's a Toyota", "go back").
+        $detected = null;
+        if ($mayAsk && $this->changeDetector) {
+            $target = $this->changeDetector->detect($turn->text(), $key, $this->stateForAi($state));
+            if ($target !== null && in_array($target, $this->flow->revisitable($state, $key), true)) {
+                $detected = $target;
             }
         }
 
-        if (!$result->ok) {
+        // Interpretation (optional).
+        $interp = null;
+        $aiFailed = false;
+        if ($mayAsk && $this->interpreter && (
+            (!$parsed->ok && $parsed->unrecognised)
+            || $detected !== null
+            || $this->policy->shouldInterpret($session, $state, $key, $turn, $parsed)
+        )) {
+            $candidate = $this->interpreter->interpret($session, $this->stateForAi($state), $key, $turn->text());
+            if ($candidate->failed()) {
+                $aiFailed = true;
+            } else {
+                $interp = $candidate;
+            }
+        }
+
+        // a) the AI's value for the current step: only when the deterministic parse failed.
+        if ($interp && !$parsed->ok && $detected === null && isset($interp->answers()[$key])) {
+            $ai = $step->stepParseRaw($interp->answers()[$key], $state);
+            if ($ai->ok) {
+                $parsed = $ai;
+            } elseif ($ai->hint !== []) {
+                $parsed->hint = $ai->hint;
+            }
+        }
+
+        // b) let the app absorb notes.
+        if ($interp) {
+            $this->listener->interpreted($session, $state, $interp);
+        }
+
+        // c) corrections of earlier answers.
+        $failedCorrections = [];
+        $applied = false;
+        if ($interp && $interp->corrections() !== []) {
+            [$labels, $failedCorrections] = $this->applyCorrections($session, $state, $key, $interp->corrections());
+            if ($labels !== []) {
+                $applied = true;
+                $this->addReply($interp);
+                $this->clearConfirmations($state);
+                $state->bumpEpoch();
+                $this->leadIn($this->messages->updated($labels), 'ack');
+                if (!$parsed->ok || $detected !== null || !$step->stepApplies($state)) {
+                    $this->ask($session, $state, $this->nextStep($state), AskReason::NEXT);
+
+                    return TurnResult::continue();
+                }
+            }
+        }
+
+        // d) go back to an earlier step: the detector found a change, the current answer is unusable,
+        //    or the interpretation is a correction/revisit that could not be applied (even if the
+        //    current text also parsed: then it is NOT committed).
+        $wantsRevisit = $interp !== null && !$applied
+            && ($interp->intent() === Interpretation::CORRECTION || $interp->revisit() !== null);
+        if ($detected !== null || !$parsed->ok || $wantsRevisit) {
+            $target = $detected;
+            $source = 'detector';
+            if ($target === null && $interp) {
+                $revisit = $interp->revisit();
+                if ($revisit !== null && in_array($revisit, $this->flow->revisitable($state, $key), true)) {
+                    $target = $revisit;
+                    $source = 'ai';
+                } elseif ($failedCorrections !== []) {
+                    $target = $failedCorrections[0];
+                    $source = 'ai_correction';
+                }
+            }
+            if ($target !== null) {
+                $this->addReply($interp);
+
+                return $this->goBack($session, $state, $key, $target, [], $source);
+            }
+        }
+
+        // e) still invalid.
+        if (!$parsed->ok) {
+            $state->setHint($key, $parsed->hint);
+            $question = $interp ? $interp->question() : null;
+            if ($question !== null) {
+                $interrupt = $this->sideQuestion($session, $state, $key, $question);
+                if ($interrupt !== null) {
+                    $state->startInterrupt($interrupt, $key);
+                    $this->ask($session, $state, $interrupt, AskReason::INTERRUPT);
+                } else {
+                    $this->ask($session, $state, $key, AskReason::REASK);
+                }
+
+                return TurnResult::continue();
+            }
+
+            $error = $aiFailed ? $this->messages->fallback() : (string) $parsed->error;
             $state->recordInvalidAttempt($key);
+            $this->listener->invalid($session, $key, $error);
+            $this->leadIn($error, 'error');
+            $this->ask($session, $state, $key, AskReason::INVALID);
 
-            return TurnResult::invalid((string) $result->error);
+            return TurnResult::invalid($error);
         }
 
-        $this->commitAnswer($state, $key, $step, $result->value);
-        foreach ($result->prefill as $prefillKey => $prefillValue) {
-            if ($this->flow->step($prefillKey)) {
-                $state->setAnswer($prefillKey, $prefillValue);
+        // f) valid.
+        $this->addReply($interp);
+        $this->commit($session, $state, $step, $parsed->value);
+        $this->leadInText($step->acknowledgeText($parsed->value, $state, $turn->is(Turn::SKIP)), 'ack');
+
+        $this->applyPrefill($session, $state, $key, $parsed->prefill, $interp ? $interp->answers() : []);
+
+        $next = $this->nextStep($state);
+        $question = $interp ? $interp->question() : null;
+        if ($question !== null) {
+            $interrupt = $this->sideQuestion($session, $state, $key, $question);
+            if ($interrupt !== null) {
+                $state->startInterrupt($interrupt, $next);
+                $this->ask($session, $state, $interrupt, AskReason::INTERRUPT);
+
+                return TurnResult::continue();
             }
         }
 
-        return $this->advance($session, $state);
-    }
-
-    private function handleEdit(ChatSession $session, ChatState $state, Turn $turn): TurnResult
-    {
-        $target = $turn->editTarget();
-        if (!$this->flow->step($target)) {
-            throw new InvalidTurnException(sprintf('Cannot edit unknown step "%s".', $target));
-        }
-
-        $state->setEditing($target);
-        $session->setCurrentStep($target);
-        $state->recordAsk($target);
+        $this->ask($session, $state, $next, AskReason::NEXT);
 
         return TurnResult::continue();
     }
 
-    private function handleSubmit(ChatSession $session, ChatState $state): TurnResult
+    private function handleEdit(ChatSession $session, ChatState $state, Turn $turn): TurnResult
     {
-        if ($this->nextStep($state) !== self::DONE) {
-            return TurnResult::invalid('Some required steps are still missing.');
+        $current = $session->currentStep();
+        $currentStep = $this->flow->step($current);
+        if ($current !== self::DONE && !($currentStep && $currentStep->allowsEdits)) {
+            throw new InvalidTurnException('Edits are not allowed from this step.');
         }
 
-        $session->markCompleted();
-        $this->flow->fireCompleted($state->answers(), $session);
+        $target = $turn->editTarget();
+        $step = $this->flow->step($target);
+        if (!$step) {
+            throw new InvalidTurnException(sprintf('Cannot edit unknown step "%s".', $target));
+        }
+        if (!$step->stepApplies($state) || !($step->isEditable() || $step->confirmation)) {
+            throw new InvalidTurnException(sprintf('Step "%s" cannot be edited.', $target));
+        }
+
+        $this->transcript->user($session, $current, $turn, $step->label);
+
+        return $this->goBack($session, $state, $current, $target, [], 'edit');
+    }
+
+    private function handleSubmit(ChatSession $session, ChatState $state, Turn $turn): TurnResult
+    {
+        $submitKey = $this->flow->submitStepKey();
+        $current = $session->currentStep();
+
+        if ($submitKey !== null) {
+            if ($current !== $submitKey || $turn->value !== true) {
+                throw new InvalidTurnException('Submit is only valid on the submit step with a true value.');
+            }
+        } elseif ($current !== self::DONE) {
+            throw new InvalidTurnException('Submit is only valid when the flow is done.');
+        }
+
+        $this->transcript->user($session, $current, $turn, $this->messages->submitLabel($state, $state->submitFailed()));
+
+        if ($this->nextStep($state) !== ($submitKey ?? self::DONE)) {
+            $this->leadIn($this->messages->incomplete(), 'error');
+            $this->ask($session, $state, $this->nextStep($state), AskReason::REASK);
+
+            return TurnResult::invalid($this->messages->incomplete());
+        }
+
+        $this->listener->submitted($session);
+
+        if ($this->flow->defersCompletion()) {
+            if (!$session instanceof DeferredCompletion) {
+                throw new LogicException('Flow::deferCompletion() needs a session that implements DeferredCompletion.');
+            }
+            $state->setSubmitFailed(false);
+            $session->markSubmitting();
+            $this->transcript->event($session, $current, 'submission started');
+
+            return TurnResult::submitting();
+        }
+
+        $step = $submitKey !== null ? $this->flow->step($submitKey) : null;
+        if ($step) {
+            $this->commit($session, $state, $step, true);
+        }
+        $state->setEditing(null);
+        $this->finish($session, $state);
 
         return TurnResult::completed();
     }
 
     private function handleInterruptAnswer(ChatSession $session, ChatState $state, Turn $turn): TurnResult
     {
-        $interruptStep = (string) $state->interruptStep();
-        $step = $this->flow->step($interruptStep);
-        $result = $step ? $step->stepParse($turn, $state) : StepResult::invalid('No handler for this interrupt.');
+        if ($turn->is(Turn::EDIT) || $turn->is(Turn::SUBMIT)) {
+            throw new InvalidTurnException('That action is not valid while a hand-off question is open.');
+        }
 
+        $key = (string) $state->interruptStep();
+        $step = $this->flow->anyStep($key);
+        if (!$step) {
+            throw new InvalidTurnException(sprintf('Unknown interrupt step "%s".', $key));
+        }
+        $this->echoTurn($session, $state, $turn, $step);
+
+        $result = $step->stepParse($turn, $state, $this->messages->required());
         if (!$result->ok) {
-            $state->recordInvalidAttempt($interruptStep);
+            $state->recordInvalidAttempt($key);
+            $state->setHint($key, $result->hint);
+            $this->listener->invalid($session, $key, (string) $result->error);
+            $this->leadIn((string) $result->error, 'error');
+            $this->ask($session, $state, $key, AskReason::INVALID);
 
             return TurnResult::invalid((string) $result->error);
         }
 
-        $this->commitAnswer($state, $interruptStep, $step, $result->value);
-        $resumeStep = (string) $state->resumeStep();
-        $state->endInterrupt();
-        $session->setCurrentStep($resumeStep);
+        $skipped = $turn->is(Turn::SKIP);
+        if ($step->storesAnswer) {
+            $this->commit($session, $state, $step, $result->value);
+        } else {
+            $state->clearHint($key);
+            $state->clearInvalidAttempts($key);
+            if ($step->afterApply) {
+                ($step->afterApply)($state, $result->value);
+            }
+            $this->listener->answered($session, $state, $key, $result->value);
+        }
 
-        return $this->advance($session, $state);
+        $ack = $step->acknowledgeText($result->value, $state, $skipped);
+        if ($ack === null) {
+            if ($skipped) {
+                $ack = $this->messages->handoffSkipped();
+            } elseif (is_string($result->value) && $result->value !== '') {
+                $ack = $this->messages->handoffWithContact($result->value);
+            } else {
+                $ack = $this->messages->handoffSaved();
+            }
+        }
+        $this->leadIn($ack, 'ack');
+
+        $resume = (string) $state->resumeStep();
+        $state->endInterrupt();
+        $next = $this->nextStep($state);
+        $reason = $next === $resume && $state->askedInEpoch($next) ? AskReason::REASK : AskReason::NEXT;
+        $this->ask($session, $state, $next, $reason);
+
+        return TurnResult::continue();
     }
 
+    // ----------------------------------------------------------- helpers
+
     /**
-     * Stores a validated answer and clears whatever steps it invalidates.
+     * Stores a validated value, clears what it invalidates and runs the
+     * step's hooks (onChange, afterApply).
      *
      * @param mixed $value
      */
-    private function commitAnswer(ChatState $state, string $key, StepDefinition $step, $value): void
+    private function commit(ChatSession $session, ChatState $state, StepDefinition $step, $value): void
     {
-        $previous = $state->has($key) ? $state->answer($key) : null;
+        $key = $step->key;
+        $had = $state->has($key);
+        $previous = $had ? $state->answer($key) : null;
+        $changed = !ChatState::same($previous, $value);
+        $differs = $had && $changed;
+
         $state->setAnswer($key, $value);
+        $state->clearHint($key);
         $state->clearInvalidAttempts($key);
 
         if ($state->editing() === $key) {
@@ -280,22 +665,302 @@ final class FlowEngine
             $state->bumpEpoch();
         }
 
-        if (!ChatState::same($previous, $value) && $step->invalidates) {
-            $state->forget(...$step->invalidates);
+        // Dependents and confirmations are only cleared when an EXISTING answer changes,
+        // never on a step's first answer (same rule as onChange).
+        if ($differs) {
+            if ($step->resetsFlow) {
+                $state->resetAnswers();
+                $state->setAnswer($key, $value);
+            } elseif ($step->invalidates) {
+                $state->forget(...$step->invalidates);
+            }
+            if (!$step->confirmation && $this->clearConfirmations($state)) {
+                $state->bumpEpoch();
+            }
+        }
+
+        if ($differs && $step->onChange) {
+            ($step->onChange)($state, $previous, $value);
+        }
+        if ($step->afterApply) {
+            ($step->afterApply)($state, $value);
+        }
+        $this->listener->answered($session, $state, $key, $value);
+    }
+
+    /**
+     * Forget every answered confirmation step. Returns true if any was cleared.
+     */
+    private function clearConfirmations(ChatState $state): bool
+    {
+        $cleared = false;
+        foreach ($this->flow->steps() as $key => $step) {
+            if ($step->confirmation && $state->has($key)) {
+                $state->forget($key);
+                $cleared = true;
+            }
+        }
+
+        return $cleared;
+    }
+
+    /**
+     * Commit corrections for earlier answers.
+     *
+     * @param array<string, mixed> $corrections
+     * @return array{0: list<string>, 1: list<string>} labels of the corrected steps, keys that could not be applied
+     */
+    private function applyCorrections(ChatSession $session, ChatState $state, string $current, array $corrections): array
+    {
+        $labels = [];
+        $failed = [];
+        foreach ($this->flow->revisitable($state, $current) as $key) {
+            if (!array_key_exists($key, $corrections)) {
+                continue;
+            }
+            $step = $this->flow->step($key);
+            if (!$step || $step->sensitive) {
+                continue;
+            }
+            $result = $step->stepPrefill($corrections[$key], $state, true);
+            if (!$result->ok) {
+                $failed[] = $key;
+                continue;
+            }
+            if (ChatState::same($state->answer($key), $result->value)) {
+                continue;
+            }
+            $old = $state->answer($key);
+            $this->commit($session, $state, $step, $result->value);
+            $labels[] = $step->label;
+            $this->transcript->event($session, $current, sprintf('correction "%s" (source: ai_correction)', $key));
+            $this->listener->corrected($session, $key, $old, $result->value);
+        }
+
+        return [$labels, $failed];
+    }
+
+    /**
+     * Fill later steps from values found in other steps' input, in FLOW ORDER,
+     * only for steps that apply, are unanswered and accept the value. Never overwrites.
+     *
+     * @param array<string, mixed> $prefill typed values from StepResult::ok()
+     * @param array<string, mixed> $aiAnswers raw interpreter suggestions
+     */
+    private function applyPrefill(ChatSession $session, ChatState $state, string $current, array $prefill, array $aiAnswers): void
+    {
+        if ($prefill === [] && $aiAnswers === []) {
+            return;
+        }
+        foreach ($this->flow->steps() as $key => $step) {
+            if ($key === $current || $step->confirmation || $step->sensitive) {
+                continue;
+            }
+            $fromAi = !array_key_exists($key, $prefill);
+            if (!array_key_exists($key, $prefill) && !array_key_exists($key, $aiAnswers)) {
+                continue;
+            }
+            if (!$step->stepApplies($state) || $state->has($key)) {
+                continue;
+            }
+            $result = $step->stepPrefill($fromAi ? $aiAnswers[$key] : $prefill[$key], $state, $fromAi);
+            if ($result->ok) {
+                $this->commit($session, $state, $step, $result->value);
+            } elseif ($result->hint !== []) {
+                $state->setHint($key, $result->hint);
+            }
         }
     }
 
-    private function advance(ChatSession $session, ChatState $state): TurnResult
+    /**
+     * Answer or hand off a side question. Returns an interrupt step key, or
+     * null when a lead-in text was added and the flow just carries on.
+     *
+     * @param array{text: string, answerable: bool, answer: ?string, topic: ?string} $question
+     */
+    private function sideQuestion(ChatSession $session, ChatState $state, string $step, array $question): ?string
     {
-        $next = $this->nextStep($state);
-        $session->setCurrentStep($next);
+        if ($question['answerable'] && $question['answer'] !== null && $question['answer'] !== '') {
+            $this->leadIn($question['answer'], 'ack');
 
-        if ($next === self::DONE) {
-            return TurnResult::continue();
+            return null;
+        }
+        $decision = $this->handoff->decide($session, $state, $step, $question);
+        if ($decision->isInterrupt()) {
+            return $decision->interruptStep;
+        }
+        $this->leadIn($decision->text, 'info');
+
+        return null;
+    }
+
+    private function addReply(?Interpretation $interp): void
+    {
+        if ($interp !== null && $interp->reply() !== '') {
+            foreach ($this->leadIns as $existing) {
+                if ($existing[0] === $interp->reply()) {
+                    return;
+                }
+            }
+            $this->leadIn($interp->reply(), 'ack');
+        }
+    }
+
+    private function leadIn(string $text, string $kind): void
+    {
+        if ($text !== '') {
+            $this->leadIns[] = [$text, $kind];
+        }
+    }
+
+    private function leadInText(?string $text, string $kind): void
+    {
+        if ($text !== null) {
+            $this->leadIn($text, $kind);
+        }
+    }
+
+    /**
+     * A copy of the state without sensitive answers, safe to hand to an
+     * interpreter or change detector.
+     */
+    private function stateForAi(ChatState $state): ChatState
+    {
+        $copy = ChatState::fromArray($state->toArray());
+        foreach ($this->flow->steps() as $key => $step) {
+            if ($step->sensitive) {
+                $copy->forget($key);
+            }
         }
 
-        $state->recordAsk($next);
+        return $copy;
+    }
 
-        return TurnResult::continue();
+    private function echoTurn(ChatSession $session, ChatState $state, Turn $turn, StepDefinition $step): void
+    {
+        if ($step->isSensitiveTurn($turn)) {
+            $echo = $this->messages->secretEntered();
+        } elseif ($step->echo) {
+            $echo = ($step->echo)($turn, $state);
+        } else {
+            $echo = DefaultEcho::echo($step, $turn, $state, $this->messages);
+        }
+        $this->transcript->user($session, $step->key, $turn, $echo);
+    }
+
+    /**
+     * Point the session at $step and write ONE assistant message: the
+     * pending lead-ins joined with a blank line, then the question.
+     */
+    private function ask(ChatSession $session, ChatState $state, string $step, string $reason): void
+    {
+        $session->setCurrentStep($step);
+
+        if ($step === self::DONE) {
+            $text = $this->messages->reviewPrompt();
+            $kind = 'review';
+        } else {
+            $state->recordAsk($step, $reason);
+            $def = $this->flow->anyStep($step);
+            $text = $def ? $def->questionText($state) : '';
+            $kind = 'question';
+        }
+
+        $this->flush($session, $state, $step, $text, $kind);
+    }
+
+    private function flush(ChatSession $session, ChatState $state, string $step, string $question, string $kind): void
+    {
+        $parts = [];
+        foreach ($this->leadIns as [$text, $leadKind]) {
+            $parts[] = $text;
+            if ($leadKind === 'error') {
+                $kind = 'error';
+            }
+        }
+        if ($question !== '') {
+            $parts[] = $question;
+        }
+        $this->leadIns = [];
+
+        $this->transcript->assistant($session, $step, implode("\n\n", $parts), $kind, $this->uiFor($session, $state));
+    }
+
+    private function finish(ChatSession $session, ChatState $state): void
+    {
+        $session->markCompleted();
+        $session->setCurrentStep(self::DONE);
+        $this->transcript->event($session, self::DONE, 'completed');
+        $this->flow->fireCompleted($state->answers(), $session);
+        $this->listener->completed($session);
+        $this->flush($session, $state, self::DONE, $this->messages->done($state), 'done');
+    }
+
+    private function enforceInvariants(ChatSession $session, ChatState $state, int $askMark): void
+    {
+        $violations = $this->invariants->repair($this->flow, $state);
+        $violations = array_merge($violations, $this->invariants->duplicateAsks($state, $askMark));
+
+        $next = $this->nextStep($state);
+        $moved = $session->currentStep() !== $next;
+        if ($moved) {
+            $violations[] = sprintf('current step "%s" is not the next step "%s"', $session->currentStep(), $next);
+        }
+        if ($violations === []) {
+            return;
+        }
+
+        $this->transcript->event($session, $session->currentStep(), 'invariant violated: ' . implode('; ', $violations));
+        $this->listener->invariantViolated($session, $violations);
+
+        if ($moved) {
+            $this->leadIns = [];
+            $this->ask($session, $state, $next, AskReason::RECOVERED);
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function uiFor(ChatSession $session, ChatState $state): array
+    {
+        $key = $session->currentStep();
+        $submitKey = $this->flow->submitStepKey();
+
+        if ($session->isCompleted()) {
+            $ui = ['type' => 'done', 'step' => self::DONE];
+        } elseif ($state->ended() || $session->turnCount() >= $this->maxTurns) {
+            $ui = ['type' => 'ended', 'text' => $this->messages->turnLimitReached(), 'step' => $key];
+        } elseif ($key === self::DONE) {
+            $ui = $this->review($state) + ['step' => self::DONE];
+            $ui += $this->submitExtras($session, $state);
+        } else {
+            $step = $this->flow->anyStep($key);
+            if (!$step) {
+                $ui = ['type' => 'done', 'step' => self::DONE];
+            } else {
+                $ui = $step->stepUi($state) + [
+                    'step' => $key,
+                    'message' => $step->questionText($state),
+                    'optional' => $step->isOptional($state),
+                ];
+                if ($key === $submitKey) {
+                    $ui += $this->submitExtras($session, $state);
+                }
+            }
+        }
+
+        return $this->flow->decorateUi($ui, $session, $state);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function submitExtras(ChatSession $session, ChatState $state): array
+    {
+        return [
+            'submitLabel' => $this->messages->submitLabel($state, $state->submitFailed()),
+            'submitting' => $session instanceof DeferredCompletion && $session->isSubmitting(),
+        ];
     }
 }
