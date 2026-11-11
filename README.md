@@ -1,4 +1,4 @@
-# AI Chat State Machine
+# StepChat
 
 [![Latest Version](https://img.shields.io/packagist/v/faridm/stepchat.svg?style=flat-square)](https://packagist.org/packages/faridm/stepchat)
 [![Tests](https://img.shields.io/github/actions/workflow/status/faridmasoum/stepchat/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/faridmasoum/stepchat/actions)
