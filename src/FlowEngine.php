@@ -381,7 +381,7 @@ final class FlowEngine
         $this->echoTurn($session, $state, $turn, $step);
 
         $mayAsk = $turn->is(Turn::TEXT) && $step->isInterpretable() && !$step->isSensitiveTurn($turn);
-        $parsed = $step->stepParse($turn, $state);
+        $parsed = $step->stepParse($turn, $state, $this->messages->required());
 
         // Deterministic change detection ("actually it's a Toyota", "go back").
         $detected = null;
@@ -590,7 +590,7 @@ final class FlowEngine
         }
         $this->echoTurn($session, $state, $turn, $step);
 
-        $result = $step->stepParse($turn, $state);
+        $result = $step->stepParse($turn, $state, $this->messages->required());
         if (!$result->ok) {
             $state->recordInvalidAttempt($key);
             $state->setHint($key, $result->hint);

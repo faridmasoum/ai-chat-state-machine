@@ -402,12 +402,15 @@ final class StepDefinition
         return ($this->ui)($state);
     }
 
-    public function stepParse(Turn $turn, ChatState $state): StepResult
+    /**
+     * @param string|null $requiredDefault error for a skip on a required step when no requiredMessage is set (the engine passes Messages::required())
+     */
+    public function stepParse(Turn $turn, ChatState $state, ?string $requiredDefault = null): StepResult
     {
         if ($turn->is(Turn::SKIP)) {
             return $this->isOptional($state)
                 ? StepResult::ok($this->skipValue)
-                : StepResult::invalid($this->requiredMessage ?? 'This step is required.');
+                : StepResult::invalid($this->requiredMessage ?? $requiredDefault ?? 'This step is required.');
         }
 
         return ($this->parse)($turn, $state);

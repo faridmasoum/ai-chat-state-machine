@@ -7,10 +7,32 @@ return [
     |--------------------------------------------------------------------------
     |
     | Safety valve passed to FlowEngine. A session that reaches this many
-    | turns gets an "invalid" result instead of continuing.
+    | turns ends (status "ended") instead of continuing.
     |
     */
     'max_turns' => 200,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Engine extensions (all optional)
+    |--------------------------------------------------------------------------
+    |
+    | Class names resolved through the container and handed to the engine.
+    |   messages              FaridM\StepChat\Contracts\Messages            (translate/reword every engine string)
+    |   interpreter           ConversationInterpreter or TurnInterpreter     (optional AI helper)
+    |   change_detector       FaridM\StepChat\Contracts\ChangeDetector      (deterministic "go back" detection)
+    |   handoff               FaridM\StepChat\Contracts\HandoffPolicy
+    |   interpretation_policy FaridM\StepChat\Contracts\InterpretationPolicy
+    |   listener              FaridM\StepChat\ConversationListener subclass
+    |
+    */
+    'messages' => null,
+    'interpreter' => null,
+    'change_detector' => null,
+    'handoff' => null,
+    'interpretation_policy' => null,
+    'listener' => null,
+    'check_invariants' => true,
 
     /*
     |--------------------------------------------------------------------------

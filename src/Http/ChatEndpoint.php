@@ -2,22 +2,32 @@
 
 namespace FaridM\StepChat\Http;
 
+use Closure;
+use FaridM\StepChat\Contracts\ChangeDetector;
+use FaridM\StepChat\Contracts\HandoffPolicy;
+use FaridM\StepChat\Contracts\InterpretationPolicy;
+use FaridM\StepChat\Contracts\Messages;
 use FaridM\StepChat\Contracts\SessionStore;
-use FaridM\StepChat\Contracts\TurnInterpreter;
+use FaridM\StepChat\Contracts\Transcript;
+use FaridM\StepChat\ConversationListener;
 use FaridM\StepChat\Exceptions\InvalidTurnException;
 use FaridM\StepChat\Exceptions\StepMismatchException;
 use FaridM\StepChat\FlowEngine;
 use FaridM\StepChat\Support\ArraySession;
+use FaridM\StepChat\Support\CompositeTranscript;
+use FaridM\StepChat\Support\EnglishMessages;
+use FaridM\StepChat\Support\SessionTranscript;
 use FaridM\StepChat\Turn;
 use FaridM\StepChat\TurnResult;
 
 /**
  * Framework-agnostic JSON protocol spoken by the browser widget.
  *
- * Request  {"flow": "name", "locale": "fa", "session": "<id>|null", "action": "start|restart|state|turn",
+ * Request  {"flow": "name", "locale": "fa", "session": "<id>|null", "cursor": 0, "action": "start|restart|state|turn",
  *           "turn": {"step": "...", "type": "text|choice|list|skip|edit|submit", "value": ...}}
- * Response {"session", "status": "continue|invalid|completed", "step", "ui",
- *           "progress": {"current","total"}, "summary": [...], "error"}
+ * Response {"session", "status": "continue|invalid|submitting|completed|ended", "step", "ui",
+ *           "progress": {"current","total"}, "summary": [...], "error",
+ *           "messages": [{id, role, kind, step, text}...] written since "cursor", "cursor": <next cursor>}
  *
  * handle() returns ['status' => <HTTP code>, 'body' => <array>] so any
  * framework can wrap it in its own response object.
@@ -30,18 +40,61 @@ final class ChatEndpoint
     /** @var SessionStore */
     private $store;
 
-    /** @var TurnInterpreter|null */
+    /** @var mixed */
     private $interpreter;
 
     /** @var int */
     private $maxTurns;
 
-    public function __construct(FlowRegistry $flows, SessionStore $store, ?TurnInterpreter $interpreter = null, int $maxTurns = 200)
-    {
+    /** @var Transcript|null */
+    private $transcript;
+
+    /** @var Messages|Closure(string|null): Messages|null */
+    private $messages;
+
+    /** @var ChangeDetector|null */
+    private $changeDetector;
+
+    /** @var HandoffPolicy|null */
+    private $handoff;
+
+    /** @var ConversationListener|null */
+    private $listener;
+
+    /** @var InterpretationPolicy|null */
+    private $policy;
+
+    /** @var bool */
+    private $checkInvariants;
+
+    /**
+     * @param \FaridM\StepChat\Contracts\ConversationInterpreter|\FaridM\StepChat\Contracts\TurnInterpreter|null $interpreter
+     * @param Messages|Closure(string|null): Messages|null $messages a Messages object, or a factory receiving the widget locale
+     */
+    public function __construct(
+        FlowRegistry $flows,
+        SessionStore $store,
+        $interpreter = null,
+        int $maxTurns = 200,
+        ?Transcript $transcript = null,
+        $messages = null,
+        ?ChangeDetector $changeDetector = null,
+        ?HandoffPolicy $handoff = null,
+        ?ConversationListener $listener = null,
+        ?InterpretationPolicy $interpretationPolicy = null,
+        bool $checkInvariants = true
+    ) {
         $this->flows = $flows;
         $this->store = $store;
         $this->interpreter = $interpreter;
         $this->maxTurns = $maxTurns;
+        $this->transcript = $transcript;
+        $this->messages = $messages;
+        $this->changeDetector = $changeDetector;
+        $this->handoff = $handoff;
+        $this->listener = $listener;
+        $this->policy = $interpretationPolicy;
+        $this->checkInvariants = $checkInvariants;
     }
 
     /**
@@ -57,7 +110,22 @@ final class ChatEndpoint
         $locale = is_string($input['locale'] ?? null) && preg_match('/^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})*$/', $input['locale'])
             ? $input['locale']
             : null;
-        $engine = new FlowEngine($this->flows->make($flowName, $locale), $this->interpreter, $this->maxTurns);
+        $messages = $this->messages instanceof Closure ? ($this->messages)($locale) : $this->messages;
+        $sessionTranscript = new SessionTranscript();
+        $engine = new FlowEngine(
+            $this->flows->make($flowName, $locale),
+            $this->interpreter,
+            $this->maxTurns,
+            $this->transcript ? new CompositeTranscript([$sessionTranscript, $this->transcript]) : $sessionTranscript,
+            $messages,
+            $this->changeDetector,
+            $this->handoff,
+            $this->listener,
+            $this->policy,
+            $this->checkInvariants
+        );
+        $defaultMessages = $messages === null || get_class($messages) === EnglishMessages::class;
+        $cursor = max(0, (int) ($input['cursor'] ?? 0));
         $action = is_string($input['action'] ?? null) ? $input['action'] : 'state';
         $id = is_string($input['session'] ?? null) && preg_match('/^[a-f0-9]{32}$/', $input['session']) ? $input['session'] : null;
         $session = $id !== null ? $this->store->load($id) : null;
@@ -68,7 +136,7 @@ final class ChatEndpoint
             $engine->start($session);
             $this->store->save($id, $session);
 
-            return $this->ok($engine, $id, $session, 'continue');
+            return $this->ok($engine, $id, $session, 'continue', null, 0, $defaultMessages);
         }
 
         if ($session === null) {
@@ -76,7 +144,7 @@ final class ChatEndpoint
         }
 
         if ($action === 'start' || $action === 'state') {
-            return $this->ok($engine, $id, $session, $session->isCompleted() ? 'completed' : 'continue');
+            return $this->ok($engine, $id, $session, $this->statusOf($session), null, $cursor, $defaultMessages);
         }
 
         if ($action !== 'turn') {
@@ -96,7 +164,7 @@ final class ChatEndpoint
             $result = $engine->handleTurn($session, new Turn($raw['step'], $raw['type'], $value));
         } catch (StepMismatchException $e) {
             // Client is out of sync (stale tab, double click): hand it the truth.
-            $response = $this->ok($engine, $id, $session, 'continue');
+            $response = $this->ok($engine, $id, $session, 'continue', null, $cursor, $defaultMessages);
             $response['status'] = 409;
             $response['body']['error'] = 'The conversation moved on. Showing the current step.';
 
@@ -107,7 +175,7 @@ final class ChatEndpoint
 
         $this->store->save($id, $session);
 
-        return $this->ok($engine, $id, $session, $result->status, $result);
+        return $this->ok($engine, $id, $session, $result->status, $result, $cursor, $defaultMessages);
     }
 
     /**
@@ -128,13 +196,13 @@ final class ChatEndpoint
     /**
      * @return array{status: int, body: array<string, mixed>}
      */
-    private function ok(FlowEngine $engine, string $id, ArraySession $session, string $status, ?TurnResult $result = null): array
+    private function ok(FlowEngine $engine, string $id, ArraySession $session, string $status, ?TurnResult $result = null, int $cursor = 0, bool $defaultMessages = true): array
     {
         $state = $session->chatState();
         $summary = [];
         foreach ($engine->flow()->steps() as $key => $step) {
-            if ($step->stepApplies($state) && $state->has($key)) {
-                $summary[] = ['step' => $key, 'label' => $step->label, 'value' => $step->stepDisplay($state)];
+            if ($step->stepApplies($state) && $state->has($key) && !$step->confirmation) {
+                $summary[] = ['step' => $key, 'label' => $step->label, 'value' => $step->stepDisplay($state), 'editable' => $step->isEditable()];
             }
         }
 
@@ -148,8 +216,23 @@ final class ChatEndpoint
                 'progress' => $engine->progress($session),
                 'summary' => $summary,
                 'error' => $result !== null && $result->isInvalid() ? $result->error : null,
+                'messages' => $session->messagesSince($cursor),
+                'cursor' => $session->messageCursor(),
+                'defaultMessages' => $defaultMessages,
             ],
         ];
+    }
+
+    private function statusOf(ArraySession $session): string
+    {
+        if ($session->isCompleted()) {
+            return 'completed';
+        }
+        if ($session->chatState()->ended()) {
+            return 'ended';
+        }
+
+        return $session->isSubmitting() ? 'submitting' : 'continue';
     }
 
     /**

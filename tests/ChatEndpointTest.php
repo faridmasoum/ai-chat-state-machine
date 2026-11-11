@@ -100,4 +100,39 @@ final class ChatEndpointTest extends TestCase
         $ep->handle('lead', ['action' => 'start', 'locale' => '<script>']);
         $this->assertSame(['fa', null], $seen);
     }
+
+    public function test_responses_carry_the_conversation_messages_with_a_cursor(): void
+    {
+        $ep = $this->endpoint();
+        $start = $ep->handle('lead', ['action' => 'start'])['body'];
+        $this->assertSame([['id' => 0, 'role' => 'assistant', 'kind' => 'question', 'step' => 'name', 'text' => 'Name']], $start['messages']);
+        $this->assertSame(1, $start['cursor']);
+
+        $bad = $ep->handle('lead', $this->turn($start['session'], 'name', 'text', '') + ['cursor' => $start['cursor']])['body'];
+        $this->assertSame(['user', 'assistant'], array_column($bad['messages'], 'role'));
+        $this->assertSame('error', $bad['messages'][1]['kind']);
+        $this->assertSame(3, $bad['cursor']);
+
+        $ok = $ep->handle('lead', $this->turn($start['session'], 'name', 'text', 'Farid') + ['cursor' => $bad['cursor']])['body'];
+        $this->assertSame(['Farid', 'Email'], array_column($ok['messages'], 'text'));
+
+        $replay = $ep->handle('lead', ['action' => 'state', 'session' => $start['session']])['body'];
+        $this->assertCount(5, $replay['messages'], 'a reloaded widget replays from cursor 0');
+    }
+
+    public function test_the_turn_limit_ends_the_session_through_the_endpoint(): void
+    {
+        $registry = (new FlowRegistry())->register('lead', static function (): Flow {
+            return Flow::make()->add(Steps::text('name', 'Name'))->add(Steps::email('email', 'Email'));
+        });
+        $ep = new ChatEndpoint($registry, new InMemorySessionStore(), null, 1);
+        $id = $ep->handle('lead', ['action' => 'start'])['body']['session'];
+        $ep->handle('lead', $this->turn($id, 'name', 'text', 'Farid'));
+
+        $r = $ep->handle('lead', $this->turn($id, 'email', 'text', 'a@b.co'))['body'];
+
+        $this->assertSame('ended', $r['status']);
+        $this->assertSame('ended', $r['ui']['type']);
+        $this->assertSame('ended', $ep->handle('lead', ['action' => 'state', 'session' => $id])['body']['status']);
+    }
 }
