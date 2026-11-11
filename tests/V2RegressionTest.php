@@ -238,4 +238,69 @@ final class V2RegressionTest extends TestCase
 
         $this->assertSame(['ai'], $sources);
     }
+
+    // reply() is shown on the invalid / side-question path too
+
+    private function budgetFlow(): Flow
+    {
+        return Flow::make()->add(
+            \FaridM\StepChat\StepDefinition::make('budget', 'What is your budget?')
+                ->parse(static function (Turn $t): StepResult {
+                    return ctype_digit($t->text()) ? StepResult::ok($t->text()) : StepResult::unrecognised('Digits only, please.');
+                })
+        );
+    }
+
+    public function test_the_ai_reply_leads_the_error_when_the_answer_is_still_invalid(): void
+    {
+        $t = new RecordingTranscript();
+        $ai = new ClosureInterpreter(static function () {
+            return Interpretation::of(['intent' => 'smalltalk', 'reply' => 'Thanks for that.']);
+        });
+        $engine = new FlowEngine($this->budgetFlow(), $ai, 200, $t);
+        $s = $this->start($engine);
+
+        $r = $engine->handleTurn($s, new Turn('budget', Turn::TEXT, 'haha thanks'));
+
+        $this->assertTrue($r->isInvalid());
+        $this->assertSame('budget', $s->currentStep());
+        $this->assertSame("Thanks for that.\n\nDigits only, please.\n\nWhat is your budget?", $t->last('assistant'));
+    }
+
+    public function test_the_ai_reply_leads_the_side_answer(): void
+    {
+        $t = new RecordingTranscript();
+        $ai = new ClosureInterpreter(static function () {
+            return Interpretation::of([
+                'reply' => 'Good question.',
+                'question' => ['text' => 'How long does it take?', 'answerable' => true, 'answer' => 'About 2 days.'],
+            ]);
+        });
+        $engine = new FlowEngine($this->budgetFlow(), $ai, 200, $t);
+        $s = $this->start($engine);
+
+        $engine->handleTurn($s, new Turn('budget', Turn::TEXT, 'how long does it take?'));
+
+        $this->assertSame('budget', $s->currentStep());
+        $this->assertSame("Good question.\n\nAbout 2 days.\n\nWhat is your budget?", $t->last('assistant'));
+    }
+
+    public function test_the_ai_reply_is_never_shown_twice(): void
+    {
+        $t = new RecordingTranscript();
+        $flow = Flow::make()->add(Flows::text('name'))->add(Flows::text('budget'))->add(Flows::text('year'));
+        $ai = new ClosureInterpreter(static function () {
+            return Interpretation::of(['reply' => 'Got it.', 'corrections' => ['name' => 'Bob']]);
+        });
+        $engine = new FlowEngine($flow, $ai, 200, $t, null, null, null, null, $this->always());
+        $s = $this->start($engine);
+        $engine->handleTurn($s, new Turn('name', Turn::TEXT, 'Ann'));
+
+        // The reply is added when the correction is applied and again on the commit path.
+        $engine->handleTurn($s, new Turn('budget', Turn::TEXT, '50'));
+
+        $this->assertSame(1, substr_count($t->last('assistant'), 'Got it.'));
+        $this->assertSame('Bob', $s->chatState()->answer('name'));
+        $this->assertSame('50', $s->chatState()->answer('budget'));
+    }
 }

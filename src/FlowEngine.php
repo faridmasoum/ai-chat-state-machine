@@ -470,6 +470,7 @@ final class FlowEngine
         // e) still invalid.
         if (!$parsed->ok) {
             $state->setHint($key, $parsed->hint);
+            $this->addReply($interp);
             $question = $interp ? $interp->question() : null;
             if ($question !== null) {
                 $interrupt = $this->sideQuestion($session, $state, $key, $question);
